@@ -1,0 +1,224 @@
+syntax = "proto3";
+
+package talk_api;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "common.proto";
+
+// ============================ Enums ============================
+
+enum StreamMode {
+  STREAM_MODE_UNSPECIFIED = 0;
+  STREAM_MODE_TEXT = 1;
+  STREAM_MODE_AUDIO = 2;
+  STREAM_MODE_BOTH = 3;
+}
+
+enum AudioFormat {
+  LINEAR16 = 0;
+  MU_LAW_8 = 1;
+}
+
+enum DisconnectionType {
+  DISCONNECTION_TYPE_UNSPECIFIED = 0;
+  DISCONNECTION_TYPE_TOOL = 1;
+  DISCONNECTION_TYPE_USER = 2;
+  DISCONNECTION_TYPE_IDLE_TIMEOUT = 3;
+  DISCONNECTION_TYPE_MAX_DURATION = 4;
+  DISCONNECTION_TYPE_ERROR = 5;
+}
+
+enum InterruptionType {
+  INTERRUPTION_TYPE_UNSPECIFIED = 0;
+  INTERRUPTION_TYPE_VAD = 1;
+  INTERRUPTION_TYPE_WORD = 2;
+}
+
+enum ToolCallAction {
+  TOOL_CALL_ACTION_UNSPECIFIED = 0;
+  TOOL_CALL_ACTION_START = 1;
+  TOOL_CALL_ACTION_END = 2;
+  TOOL_CALL_ACTION_ANY = 3;
+}
+
+// ============================ هويات المستخدم ============================
+
+message PhoneIdentity {
+  string phoneNumber = 1;
+}
+
+message WebIdentity {
+  string userId = 1;
+}
+
+// ============================ إعدادات الصوت ============================
+
+message AudioConfig {
+  uint32 sampleRate = 1;
+  AudioFormat audioFormat = 2;
+  uint32 channels = 3;
+}
+
+message TextConfig {
+  uint64 maxCharacterCount = 1;
+}
+
+message StreamConfig {
+  StreamMode mode = 1;
+  AudioConfig audioConfig = 2;
+  TextConfig textConfig = 3;
+}
+
+// ============================ رسائل التدفق (Stream) ============================
+
+message ConversationConfiguration {
+  StreamMode streamMode = 2;
+}
+
+message ConversationInitialization {
+  uint64 assistantConversationId = 1;
+  common.AssistantDefinition assistant = 2;
+  google.protobuf.Timestamp time = 3;
+  map<string, google.protobuf.Any> metadata = 4;
+  map<string, google.protobuf.Any> args = 5;
+  map<string, google.protobuf.Any> options = 6;
+  StreamMode streamMode = 7;
+  oneof userIdentity {
+    PhoneIdentity phone = 10;
+    WebIdentity web = 11;
+  }
+}
+
+message ConversationUserMessage {
+  uint64 id = 2;
+  bool completed = 3;
+  google.protobuf.Timestamp time = 4;
+  oneof message {
+    bytes audio = 10;
+    string text = 11;
+  }
+}
+
+message ConversationAssistantMessage {
+  uint64 id = 2;
+  bool completed = 3;
+  google.protobuf.Timestamp time = 4;
+  oneof message {
+    bytes audio = 10;
+    string text = 11;
+  }
+}
+
+message ConversationInterruption {
+  uint64 id = 1;
+  InterruptionType type = 2;
+  google.protobuf.Timestamp time = 3;
+}
+
+message ConversationDisconnection {
+  uint64 id = 1;
+  DisconnectionType type = 2;
+  google.protobuf.Timestamp time = 3;
+}
+
+message ConversationError {
+  uint64 assistantConversationId = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+message ConversationMetadata {
+  uint64 assistantConversationId = 1;
+  repeated common.Metadata metadata = 2;
+}
+
+message ConversationMetric {
+  uint64 assistantConversationId = 1;
+  repeated common.Metric metrics = 2;
+}
+
+message ConversationEvent {
+  uint64 id = 1;
+  string name = 2;
+  map<string, string> data = 3;
+  google.protobuf.Timestamp time = 4;
+}
+
+message ConversationToolCall {
+  uint64 id = 1;
+  string toolId = 2;
+  string name = 3;
+  ToolCallAction action = 4;
+  map<string, string> args = 5;
+  google.protobuf.Timestamp time = 6;
+}
+
+message ConversationToolCallResult {
+  uint64 id = 1;
+  uint64 toolCallId = 2;
+  string toolId = 3;
+  string name = 4;
+  bool success = 5;
+  string result = 6;
+}
+
+// ============================ طلب/استجابة Talk ============================
+
+message AssistantTalkRequest {
+  oneof request {
+    ConversationInitialization initialization = 1;
+    ConversationConfiguration configuration = 2;
+    ConversationUserMessage message = 3;
+    ConversationMetadata metadata = 4;
+    ConversationMetric metric = 5;
+    ConversationDisconnection disconnection = 6;
+    ConversationToolCallResult toolCallResult = 7;
+    ConversationUserMessage bridgeOperatorAudio = 8;
+    ConversationUserMessage bridgeUserAudio = 9;
+  }
+}
+
+message AssistantTalkResponse {
+  int32 code = 1;
+  bool success = 2;
+  oneof data {
+    ConversationInitialization initialization = 8;
+    ConversationConfiguration configuration = 9;
+    ConversationInterruption interruption = 10;
+    ConversationUserMessage user = 11;
+    ConversationAssistantMessage assistant = 12;
+    ConversationToolCall toolCall = 13;
+    ConversationToolCallResult toolCallResult = 14;
+    ConversationError error = 15;
+    ConversationMetadata metadata = 17;
+    ConversationMetric metric = 18;
+    ConversationDisconnection disconnection = 19;
+    ConversationEvent event = 20;
+  }
+}
+
+// ============================ إنشاء مكالمة صوتية ============================
+
+message CreatePhoneCallRequest {
+  common.AssistantDefinition assistant = 1;
+  map<string, google.protobuf.Any> metadata = 3;
+  map<string, google.protobuf.Any> args = 4;
+  map<string, google.protobuf.Any> options = 5;
+  string fromNumber = 6;
+  string toNumber = 7;
+}
+
+message CreatePhoneCallResponse {
+  int32 code = 1;
+  bool success = 2;
+  common.AssistantConversation data = 3;
+  common.Error error = 4;
+}
+
+// ============================ الخدمة ============================
+
+service TalkService {
+  rpc AssistantTalk(stream AssistantTalkRequest) returns (stream AssistantTalkResponse);
+  rpc CreatePhoneCall(CreatePhoneCallRequest) returns (CreatePhoneCallResponse);
+}

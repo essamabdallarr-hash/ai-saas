@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package common;
+
+import "google/protobuf/timestamp.proto";
+
+// تعريف وكيل rapida — يتم إدارة الوكيل بالكامل على خادم rapida عبر المعرّف
+message AssistantDefinition {
+  uint64 assistantId = 1;
+  string version = 2;
+}
+
+// رسالة خطأ موحدة (Error)
+message Error {
+  uint64 errorCode = 1;
+  string errorMessage = 2;
+  string humanMessage = 3;
+}
+
+// مقياس محادثة (Metric)
+message Metric {
+  string name = 1;
+  string value = 2;
+  string description = 3;
+}
+
+// بيانات وصفية (Metadata)
+message Metadata {
+  uint64 id = 1;
+  string key = 2;
+  string value = 3;
+}
+
+// جلسة محادثة (AssistantConversation) — الحقول المستخدمة فعلياً في هذا الـ SaaS
+message AssistantConversation {
+  uint64 id = 1;
+  uint64 userId = 2;
+  uint64 assistantId = 3;
+  string name = 4;
+  string source = 7;
+  string status = 15;
+  google.protobuf.Timestamp createdDate = 26;
+  google.protobuf.Timestamp updatedDate = 27;
+  repeated Metric metrics = 30;
+  repeated Metadata metadata = 32;
+  string direction = 34;
+}

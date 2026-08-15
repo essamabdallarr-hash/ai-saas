@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package google.protobuf;
+
+// نسخة مصغّرة من google/protobuf/any.proto (نفس الحقول لضمان التوافق السلكي)
+message Any {
+  string type_url = 1;
+  bytes value = 2;
+}

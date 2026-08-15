@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package google.protobuf;
+
+// نسخة مصغّرة من google/protobuf/timestamp.proto (نفس الحقول)
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
