@@ -1,5 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { I18nProvider, useI18n } from '@/i18n';
 import { TenantShell } from '@/components/layout/TenantShell';
 import { SuperAdminShell } from '@/components/layout/SuperAdminShell';
 import { LoginScreen } from '@/features/auth/LoginScreen';
@@ -14,17 +15,18 @@ import { AgentBuilder } from '@/features/agent/AgentBuilder';
 import { useAuth } from '@/lib/useAuth';
 
 function Splash() {
+  const { t } = useI18n();
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950">
-      <div className="flex items-center gap-2 text-slate-400">
-        <Loader2 className="h-5 w-5 animate-spin text-brand-400" />
-        جارٍ التحقق من الجلسة...
+    <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex items-center gap-2 text-[#667085]">
+        <Loader2 className="h-5 w-5 animate-spin text-brand-500" />
+        {t.checkingSession}
       </div>
     </div>
   );
 }
 
-export default function App() {
+function AppRoutes() {
   const { session, setSession, loading, logout } = useAuth();
 
   if (loading) return <Splash />;
@@ -54,5 +56,13 @@ export default function App() {
       )}
       <Route path="*" element={<Navigate to={isAdmin ? '/admin' : '/workspace'} replace />} />
     </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppRoutes />
+    </I18nProvider>
   );
 }

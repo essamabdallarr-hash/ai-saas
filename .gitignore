@@ -1,0 +1,32 @@
+# ===== Node / Build =====
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ===== البيئات والأسرار (لا تُرفع أبدًا) =====
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# ===== ملفات التخزين (TTS cache / المستندات / جلسات الواتساب) =====
+storage/
+backend/storage/
+*.session
+*.session.json
+.qr
+
+# ===== سجلات =====
+*.log
+logs/
+npm-debug.log*
+
+# ===== أدوات =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== الواجهة =====
+frontend/dist/

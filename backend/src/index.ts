@@ -52,6 +52,7 @@ async function seedDevData(): Promise<void> {
       update: { tenantId: tenant.id, passwordHash: await hashPassword('Admin@123') },
     });
 
+    // حساب مالك المنصة (Super Admin) — بوابة الإدارة المركزية
     await prisma.user.upsert({
       where: { email: 'owner@demo.local' },
       create: {
@@ -64,6 +65,7 @@ async function seedDevData(): Promise<void> {
       update: { role: 'SUPER_ADMIN', passwordHash: await hashPassword('Owner@123') },
     });
 
+    // حقول استخراج افتراضية للوكيل التجريبي (تظهر في AI Studio و DynamicReports)
     const fieldCount = await prisma.dynamicField.count({ where: { tenantId: tenant.id } });
     if (fieldCount === 0) {
       const agent = await prisma.agent.findFirst({ where: { tenantId: tenant.id } });
@@ -76,39 +78,74 @@ async function seedDevData(): Promise<void> {
       });
     }
 
-    console.log('[dev] تم تجهيز بيانات التجربة');
+    console.log('[dev] تم تجهيز بيانات التجربة (tenant=demo / admin@demo.local / owner@demo.local)');
+    const agentCount = await prisma.agent.count({ where: { tenantId: tenant.id } });
+    if (agentCount === 0) {
+      await prisma.agent.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'وكيل المبيعات التجريبي',
+          status: 'ACTIVE',
+          objective: 'استقبال العميل، التعرف على احتياجه، واستخراج الميزانية وموعد المتابعة.',
+          voiceId: 'ar-EG-SalmaNeural',
+          systemPrompt: 'أنت وكيل مبيعات ذكي يتحدث العربية بطلاقة. ابدأ بتحية ودية، واسأل عن احتياج العميل، ثم اقترح الحل.',
+        },
+      });
+    }
+    console.log('[dev] تم تجهيز بيانات التجربة (tenant=demo / admin@demo.local)');
   } catch (err) {
-    console.warn('[dev] قاعدة البيانات غير متاحة:', (err as Error).message);
+    console.warn('[dev] قاعدة البيانات غير متاحة الآن — نفّذ prisma migrate dev ثم أعد التشغيل. السبب:', (err as Error).message);
   }
 }
 
-// إنشاء التطبيق وتصديره لـ Vercel
-const app = express();
-app.use(cors({ origin: config.corsOrigin.split(','), credentials: true }));
-app.use(express.json({ limit: '10mb' }));
+async function main(): Promise<void> {
+  await seedDevData();
 
-const ttsDir = path.join(config.storageDir, 'tts');
-app.use('/tts', express.static(ttsDir));
+  const app = express();
+  app.use(cors({ origin: config.corsOrigin.split(','), credentials: true }));
+  app.use(express.json({ limit: '10mb' }));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'universal-ai-agent-backend', ts: new Date().toISOString() });
-});
+  // ملفات TTS المُولّدة + الصوتيات
+  const ttsDir = path.join(config.storageDir, 'tts');
+  app.use('/tts', express.static(ttsDir));
 
-app.use('/api', router);
-app.use(notFound);
-app.use(errorHandler);
-
-// تشغيل الـ WebSocket والـ Seed فقط إذا كنا نشغل الكود محلياً وليس على Vercel
-if (process.env.NODE_ENV !== 'production') {
-  void seedDevData().then(() => {
-    const server = http.createServer(app);
-    hub.attach(server);
-    hub.setMessageHandler(async (tenantId, userId, msg) => {
-       // معالجة الرسائل
-    });
-    server.listen(config.port, () => console.log(`Backend running on port ${config.port}`));
+  app.get('/health', (_req, res) => {
+    res.json({ ok: true, service: 'universal-ai-agent-backend', ts: new Date().toISOString() });
   });
+
+  app.use('/api', router);
+  app.use(notFound);
+  app.use(errorHandler);
+
+  const server = http.createServer(app);
+  hub.attach(server);
+  hub.setMessageHandler(async (tenantId, userId, msg) => {
+    try {
+      if (msg.type === 'takeover.request' && msg.conversationId) {
+        await takeoverConversation(tenantId, msg.conversationId, { userId: userId ?? 'anonymous' });
+      } else if (msg.type === 'message.send' && msg.conversationId && typeof msg.text === 'string') {
+        const engine = await resolveWhatsAppEngine(tenantId);
+        if (!engine) return;
+        await whatsappConversationService.sendHumanReply(tenantId, msg.conversationId, msg.text, engine);
+      }
+    } catch (err) {
+      console.error('[ws] معالجة رسالة فشلت:', (err as Error).message);
+    }
+  });
+
+  server.listen(config.port, () => {
+    console.log(`[server] Universal AI Agent SaaS backend يعمل على http://localhost:${config.port}`);
+    console.log(`[server] WebSocket Live Inbox: ws://localhost:${config.port}/ws/inbox`);
+    console.log(`[server] Rapida gRPC: ${config.rapidaGrpcUrl || 'غير مهيأ (RAPIDA_ASSISTANT_GRPC_URL)'}`);
+  });
+
+  const shutdown = async () => {
+    console.log('\n[server] إيقاف التشغيل...');
+    await prisma.$disconnect();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
-// تصدير التطبيق لـ Vercel
-export default app;
+void main();

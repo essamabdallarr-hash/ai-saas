@@ -1,6 +1,7 @@
 import { Volume2 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import { useI18n } from '@/i18n';
 import { Field } from '@/components/ui';
 
 export interface VoiceOption {
@@ -10,7 +11,6 @@ export interface VoiceOption {
   language: string;
 }
 
-// أصوات Azure TTS العربية المدعومة (Arabic Neural Voices)
 export const AZURE_ARABIC_VOICES: VoiceOption[] = [
   { voiceId: 'ar-EG-SalmaNeural', name: 'سلمى (مصر)', gender: 'female', language: 'ar-EG' },
   { voiceId: 'ar-EG-ShakirNeural', name: 'شاكر (مصر)', gender: 'male', language: 'ar-EG' },
@@ -30,6 +30,7 @@ export function VoicePicker({
   voiceId: string;
   onChange: (voiceId: string) => void;
 }) {
+  const { t } = useI18n();
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
 
@@ -37,7 +38,6 @@ export function VoicePicker({
     setPreviewing(id);
     setPreviewError(null);
     try {
-      // Step 3: POST /tts/preview → يعيد رابط صوت تجريبي عبر Azure TTS
       const { audioUrl } = await api<{ audioUrl: string }>('/tts/preview', {
         method: 'POST',
         json: { text: `مرحبًا، أنا ${name}، جاهزة للتحدث معك.`, voiceId: id },
@@ -45,7 +45,7 @@ export function VoicePicker({
       const audio = new Audio(audioUrl);
       await audio.play();
     } catch {
-      setPreviewError('معاينة الصوت غير متاحة الآن (ستُفعّل في Step 3).');
+      setPreviewError(t.voicePicker.previewError);
     } finally {
       setPreviewing(null);
     }
@@ -53,7 +53,7 @@ export function VoicePicker({
 
   return (
     <div>
-      <Field label="صوت البوت" hint="يتم التوليد عبر Azure TTS مع Smart Caching للجمل المتكررة">
+      <Field label={t.voicePicker.label} hint={t.voicePicker.hint}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {AZURE_ARABIC_VOICES.map((voice) => {
             const active = voice.voiceId === voiceId;
@@ -65,7 +65,7 @@ export function VoicePicker({
                 className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors ${
                   active
                     ? 'border-brand-500 bg-brand-50 text-brand-700'
-                    : 'border-slate-200 text-slate-700 hover:border-brand-300'
+                    : 'border-[#E5E7EB] text-[#111111] hover:border-brand-300'
                 }`}
               >
                 <span className="flex items-center gap-2">
@@ -85,9 +85,9 @@ export function VoicePicker({
                       playPreview(voice.voiceId, voice.name);
                     }
                   }}
-                  className="rounded bg-white px-2 py-0.5 text-[10px] text-brand-600 ring-1 ring-brand-200 hover:bg-brand-50"
+                  className="rounded bg-white px-2 py-0.5 text-[10px] text-brand-500 ring-1 ring-brand-200 hover:bg-brand-50"
                 >
-                  {previewing === voice.voiceId ? '...' : 'استمع'}
+                  {previewing === voice.voiceId ? '...' : t.voicePicker.listen}
                 </span>
               </button>
             );
