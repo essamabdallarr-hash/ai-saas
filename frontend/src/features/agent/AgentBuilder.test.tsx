@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentBuilder } from './AgentBuilder';
 import { api } from '@/lib/api';
-import { I18nProvider } from '@/i18n';
 import type { Agent } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
@@ -60,7 +59,7 @@ describe('AgentBuilder', () => {
       return Promise.reject(new Error(`no route: ${path}`));
     });
 
-    render(<I18nProvider><AgentBuilder /></I18nProvider>);
+    render(<AgentBuilder />);
 
     const nameInput = await screen.findByDisplayValue('الوكيل الرئيسي');
     await user.clear(nameInput);
@@ -80,7 +79,7 @@ describe('AgentBuilder', () => {
       return Promise.reject(new Error(`no route: ${path}`));
     });
 
-    render(<I18nProvider><AgentBuilder /></I18nProvider>);
+    render(<AgentBuilder />);
     await screen.findByDisplayValue('الوكيل الرئيسي');
 
     await user.click(screen.getByRole('button', { name: /قاعدة المعرفة/ }));

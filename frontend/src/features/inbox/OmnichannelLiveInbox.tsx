@@ -1,7 +1,6 @@
 import { CheckCircle2, MessageCircle, Phone, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
-import { useI18n } from '@/i18n';
 import { HumanTakeoverButton } from './HumanTakeoverButton';
 import { TranscriptFeed } from './TranscriptFeed';
 import { WhatsAppThread } from './WhatsAppThread';
@@ -25,7 +24,6 @@ interface LiveState {
  *  - زر Human Takeover أحمر بارز لإيقاف الـ AI فورًا.
  */
 export function OmnichannelLiveInbox() {
-  const { t } = useI18n();
   const [state, setState] = useState<LiveState>({
     conversations: [],
     eventsByCall: {},
@@ -40,14 +38,18 @@ export function OmnichannelLiveInbox() {
   const socketRef = useRef<LiveSocket | null>(null);
 
   useEffect(() => {
+    // التحميل الأولي للمحادثات المفتوحة
     api<Conversation[]>('/conversations?status=OPEN')
       .then((list) => {
         setState((s) => ({ ...s, conversations: list }));
         if (list.length > 0) setSelectedId((id) => id ?? list[0].id);
       })
-      .catch(() => {})
+      .catch(() => {
+        /* ستظهر المحادثات عبر WebSocket عند تشغيل الـ Backend */
+      })
       .finally(() => setLoading(false));
 
+    // حالة اتصال الواتساب
     api<{ status: WhatsappConnectionStatus }[]>('/whatsapp/connections')
       .then((conns) => {
         const active = conns.find((c) => c.status === 'CONNECTED');
@@ -56,6 +58,7 @@ export function OmnichannelLiveInbox() {
       })
       .catch(() => {});
 
+    // اتصال WebSocket الحي
     const socket = new LiveSocket('/ws/inbox');
     socket.onEvent((ev) => {
       switch (ev.type) {
@@ -157,6 +160,7 @@ export function OmnichannelLiveInbox() {
     socketRef.current?.send({ type: 'message.send', conversationId: selected.id, text });
   }
 
+  // إنهاء المحادثة → يطلق تلخيص AI + استخراج الحقول الديناميكية ثم إغلاقها
   async function closeSelected() {
     if (!selected || closing) return;
     setClosing(true);
@@ -167,6 +171,7 @@ export function OmnichannelLiveInbox() {
         conversations: s.conversations.filter((c) => c.id !== selected.id),
       }));
     } catch {
+      /* يظهر الخطأ عبر البث أو يبقى المحادثة مفتوحة */
     } finally {
       setClosing(false);
     }
@@ -177,35 +182,36 @@ export function OmnichannelLiveInbox() {
   return (
     <div>
       <Card
-        title={`${t.inbox.liveInboxOmnichannel} — ${activeCount} ${t.inbox.activeConversations}`}
-        hint={t.inbox.liveUpdateHint}
+        title={`البريد الوارد المباشر (Omnichannel) — ${activeCount} محادثة نشطة`}
+        hint="تُحدَّث لحظيًا عبر WebSocket · صوتي وواتساب في مكان واحد"
         actions={
           <div className="flex items-center gap-2">
             <Badge tone={connectionStatus === 'CONNECTED' ? 'green' : connectionStatus === 'QR_PENDING' ? 'amber' : 'gray'}>
               <MessageCircle className="h-3 w-3" />
-              {connectionStatus === 'CONNECTED' ? t.inbox.whatsappConnected : connectionStatus === 'QR_PENDING' ? t.inbox.qrPending : t.inbox.whatsappDisconnected}
+              {connectionStatus === 'CONNECTED' ? 'واتساب متصل' : connectionStatus === 'QR_PENDING' ? 'بانتظار QR' : 'واتساب غير متصل'}
             </Badge>
             <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
               <RefreshCw className="h-4 w-4" />
-              {t.inbox.refresh}
+              تحديث
             </Button>
           </div>
         }
       >
         {loading ? (
-          <Spinner label={t.inbox.loadingConversations} />
+          <Spinner label="جارٍ تحميل المحادثات..." />
         ) : (
           <div className="grid min-h-[70vh] grid-cols-1 gap-4 lg:grid-cols-[300px_1fr]">
-            <div className="divide-y divide-[#E5E7EB] overflow-y-auto border-l border-[#E5E7EB] lg:max-h-[70vh] lg:pl-2 scrollbar-thin">
+            {/* ——— يمين: قائمة المحادثات النشطة ——— */}
+            <div className="divide-y divide-slate-100 overflow-y-auto border-l border-slate-100 lg:max-h-[70vh] lg:pl-2 scrollbar-thin">
               {state.conversations.length === 0 && (
-                <p className="p-4 text-sm text-[#98A2B3]">{t.inbox.noActiveConversations}</p>
+                <p className="p-4 text-sm text-slate-400">لا توجد محادثات نشطة الآن</p>
               )}
               {state.conversations.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => setSelectedId(c.id)}
                   className={`flex w-full items-center justify-between gap-2 px-2 py-3 text-right transition-colors ${
-                    selectedId === c.id ? 'bg-brand-50' : 'hover:bg-[#F9FCFB]'
+                    selectedId === c.id ? 'bg-brand-50' : 'hover:bg-slate-50'
                   }`}
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -215,13 +221,13 @@ export function OmnichannelLiveInbox() {
                       <MessageCircle className="h-4 w-4 shrink-0 text-ok-500" />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-[#111111]" dir="ltr">
-                        {c.contactNumber || t.inbox.unknownNumber}
+                      <span className="block truncate text-sm font-medium text-slate-800" dir="ltr">
+                        {c.contactNumber || 'رقم مجهول'}
                       </span>
-                      <span className="block text-xs text-[#98A2B3]">
+                      <span className="block text-xs text-slate-400">
                         {c.channel === 'VOICE'
-                          ? `${t.inbox.voice} · ${formatDuration(c.call?.durationSec ?? 0)}`
-                          : `${t.inbox.whatsapp} · ${state.messagesByConversation[c.id]?.length ?? 0} ${t.inbox.message}`}
+                          ? `صوتي · ${formatDuration(c.call?.durationSec ?? 0)}`
+                          : `واتساب · ${state.messagesByConversation[c.id]?.length ?? 0} رسالة`}
                       </span>
                     </span>
                   </span>
@@ -238,30 +244,32 @@ export function OmnichannelLiveInbox() {
               ))}
             </div>
 
+            {/* ——— يسار: تفاصيل المحادثة ——— */}
             {selected ? (
               <div className="flex min-w-0 flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[#111111]" dir="ltr">
+                    <p className="truncate text-sm font-semibold text-slate-800" dir="ltr">
                       {selected.contactNumber}
                     </p>
-                    <p className="text-xs text-[#98A2B3]">
-                      {selected.channel === 'VOICE' ? t.inbox.voiceCall : t.inbox.whatsappChat}
+                    <p className="text-xs text-slate-400">
+                      {selected.channel === 'VOICE' ? 'مكالمة صوتية' : 'محادثة واتساب'}
                       {selected.status === 'HUMAN_TAKEOVER' && (
-                        <span className="text-amber-600"> · {t.inbox.humanTakeover}: {selected.call?.takenOverByName}</span>
+                        <span className="text-amber-600"> · تحويل بشري: {selected.call?.takenOverByName}</span>
                       )}
                     </p>
                   </div>
+                  {/* زر Human Takeover الأحمر البارز + إنهاء المحادثة */}
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
                       variant="secondary"
                       disabled={selected.status === 'CLOSED' || closing}
                       onClick={closeSelected}
-                      title={t.inbox.closeConversationHint}
+                      title="تلخيص + استخراج الحقول ثم إغلاق المحادثة"
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      {closing ? t.inbox.closing : t.inbox.closeConversation}
+                      {closing ? 'جارٍ الإنهاء...' : 'إنهاء المحادثة'}
                     </Button>
                     <HumanTakeoverButton
                       active={selected.status === 'HUMAN_TAKEOVER'}
@@ -272,15 +280,15 @@ export function OmnichannelLiveInbox() {
                 </div>
 
                 {selected.channel === 'VOICE' ? (
-                  <div className="rounded-xl border border-[#E5E7EB]">
-                    <div className="border-b border-[#E5E7EB] px-3 py-2 text-xs font-medium text-[#667085]">
-                      {t.inbox.liveTranscript}
+                  <div className="rounded-xl border border-slate-200">
+                    <div className="border-b border-slate-100 px-3 py-2 text-xs font-medium text-slate-500">
+                      التفريغ اللحظي (Live Transcript)
                     </div>
                     <TranscriptFeed events={selected.call ? state.eventsByCall[selected.call.id] ?? [] : []} />
                     <ExtractedPanel data={selected.call ? state.extractedByCall[selected.call.id] : undefined} />
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-[#E5E7EB]">
+                  <div className="rounded-xl border border-slate-200">
                     <WhatsAppThread
                       messages={state.messagesByConversation[selected.id] ?? []}
                       connectionStatus={connectionStatus}
@@ -291,8 +299,8 @@ export function OmnichannelLiveInbox() {
                 )}
               </div>
             ) : (
-              <p className="flex items-center justify-center text-sm text-[#98A2B3]">
-                {t.inbox.selectConversationHint}
+              <p className="flex items-center justify-center text-sm text-slate-400">
+                اختر محادثة من القائمة لمتابعة تفريغها لحظيًا
               </p>
             )}
           </div>
@@ -303,16 +311,15 @@ export function OmnichannelLiveInbox() {
 }
 
 function ExtractedPanel({ data }: { data?: Record<string, string> }) {
-  const { t } = useI18n();
   const entries = Object.entries(data ?? {});
   if (entries.length === 0) return null;
   return (
-    <div className="border-t border-[#E5E7EB] bg-[#FAFAFA] p-3">
-      <p className="mb-2 text-xs font-medium text-[#667085]">{t.inbox.extractedFields}</p>
+    <div className="border-t border-slate-100 bg-slate-50/50 p-3">
+      <p className="mb-2 text-xs font-medium text-slate-500">الحقول المستخرجة لحظيًا</p>
       <div className="flex flex-wrap gap-2">
         {entries.map(([key, value]) => (
-          <span key={key} className="rounded-lg bg-white px-2 py-1 text-xs ring-1 ring-[#E5E7EB]">
-            <span className="text-[#98A2B3]">[{key}]</span> <span className="font-medium text-[#667085]">{value}</span>
+          <span key={key} className="rounded-lg bg-white px-2 py-1 text-xs ring-1 ring-slate-200">
+            <span className="text-slate-400">[{key}]</span> <span className="font-medium text-slate-700">{value}</span>
           </span>
         ))}
       </div>

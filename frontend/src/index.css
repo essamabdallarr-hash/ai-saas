@@ -1,18 +1,13 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    font-family: 'Cairo', sans-serif;
+    font-family: theme('fontFamily.sans');
   }
   body {
-    @apply bg-white text-[#111111] antialiased;
-  }
-  button, input, select, textarea {
-    font-family: 'Cairo', sans-serif;
+    @apply bg-slate-50 text-slate-900 antialiased;
   }
 }
 
@@ -22,9 +17,19 @@
     height: 6px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-[#D0D5DD];
+    @apply rounded-full bg-slate-300;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .scrollbar-dark::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-dark::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-600;
+  }
+  .scrollbar-dark::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
 }

@@ -1,7 +1,6 @@
 import { Hand, UserRoundCheck } from 'lucide-react';
 import { useState } from 'react';
 import { Button, Modal } from '@/components/ui';
-import { useI18n } from '@/i18n';
 
 /**
  * زر التحويل البشري الأحمر البارز (Human Takeover).
@@ -18,7 +17,6 @@ export function HumanTakeoverButton({
   enabled: boolean;
   onTakeover: () => void;
 }) {
-  const { t } = useI18n();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [takenOverBy, setTakenOverBy] = useState<string | null>(null);
 
@@ -27,7 +25,7 @@ export function HumanTakeoverButton({
       <div className="flex items-center gap-2 rounded-lg border border-ok-500/40 bg-ok-50 px-3 py-2 text-sm text-ok-600">
         <UserRoundCheck className="h-4 w-4" />
         <span>
-          {t.inbox.continueAsHuman}
+          استكمل المحادثة كبشري
           {takenOverBy ? ` — ${takenOverBy}` : ''}
         </span>
       </div>
@@ -36,8 +34,8 @@ export function HumanTakeoverButton({
 
   if (!enabled) {
     return (
-      <div className="rounded-lg border border-[#E5E7EB] bg-[#FAFAFA] px-3 py-2 text-xs text-[#98A2B3]">
-        {t.inbox.takeoverDisabled}
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+        التحويل البشري معطّل في باقتك
       </div>
     );
   }
@@ -49,16 +47,17 @@ export function HumanTakeoverButton({
         className="flex items-center gap-2 rounded-lg bg-danger-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-danger-600/30 transition-colors hover:bg-danger-700"
       >
         <Hand className="h-4 w-4" />
-        {t.inbox.takeoverButton}
+        Human Takeover — تحويل فوري
       </button>
 
-      <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title={t.inbox.confirmTakeover}>
-        <p className="text-sm text-[#667085]">
-          {t.inbox.takeoverDescription}
+      <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="تأكيد التحويل البشري">
+        <p className="text-sm text-slate-600">
+          سيتم إيقاف محرك الـ AI فورًا لهذه المحادثة، وستتمكن أنت من استكمالها يدويًا (صوتيًا أو
+          نصيًا) مع تمرير سياق المحادثة كاملًا.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
-            {t.inbox.cancel}
+            إلغاء
           </Button>
           <Button
             variant="danger"
@@ -68,7 +67,7 @@ export function HumanTakeoverButton({
               onTakeover();
             }}
           >
-            {t.inbox.takeoverNow}
+            تحويل الآن
           </Button>
         </div>
       </Modal>

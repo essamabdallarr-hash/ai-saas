@@ -3,21 +3,24 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Field, Input, PageHeader, Spinner, Toggle } from '@/components/ui';
 import { api } from '@/lib/api';
 import type { WhatsappConnection, WhatsappConnectionStatus, WhatsappEngine } from '@/lib/types';
-import { useI18n } from '@/i18n';
 
-function statusBadge(status: WhatsappConnectionStatus, t: ReturnType<typeof useI18n>['t']) {
+function statusBadge(status: WhatsappConnectionStatus) {
   const map: Record<WhatsappConnectionStatus, { tone: 'green' | 'red' | 'amber' | 'gray'; label: string }> = {
-    CONNECTED: { tone: 'green', label: t.whatsapp.statusConnected },
-    QR_PENDING: { tone: 'amber', label: t.whatsapp.statusQrPending },
-    DISCONNECTED: { tone: 'gray', label: t.whatsapp.statusDisconnected },
-    BROKEN: { tone: 'red', label: t.whatsapp.statusBroken },
-    BANNED: { tone: 'red', label: t.whatsapp.statusBanned },
+    CONNECTED: { tone: 'green', label: 'متصل' },
+    QR_PENDING: { tone: 'amber', label: 'بانتظار مسح QR' },
+    DISCONNECTED: { tone: 'gray', label: 'غير متصل' },
+    BROKEN: { tone: 'red', label: 'انقطع الاتصال' },
+    BANNED: { tone: 'red', label: 'محظور' },
   };
   return map[status];
 }
 
+/**
+ * ربط الواتساب — واجهة بسيطة:
+ *  - باقة FREE_QR → يعرض QR Code للمسح.
+ *  - باقة OFFICIAL_META → حقول Token (Phone Number ID / WABA / Access Token).
+ */
 export function WhatsAppSetup() {
-  const { t } = useI18n();
   const [connections, setConnections] = useState<WhatsappConnection[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,10 +29,12 @@ export function WhatsAppSetup() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
+  // حقول Meta الرسمي
   const [metaPhoneNumberId, setMetaPhoneNumberId] = useState('');
   const [metaWabaId, setMetaWabaId] = useState('');
   const [metaAccessToken, setMetaAccessToken] = useState('');
 
+  // إعدادات متقدمة
   const [typingDelayMs, setTypingDelayMs] = useState(4000);
   const [spintaxEnabled, setSpintaxEnabled] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -37,12 +42,13 @@ export function WhatsAppSetup() {
   function load() {
     api<WhatsappConnection[]>('/whatsapp/connections')
       .then(setConnections)
-      .catch((err) => setError(err instanceof Error ? err.message : t.whatsapp.loadFailed))
+      .catch((err) => setError(err instanceof Error ? err.message : 'تعذر تحميل الاتصالات'))
       .finally(() => setLoading(false));
   }
 
   useEffect(load, []);
 
+  // عند وجود اتصال حر → نستعلم عن حالته حتى يظهر QR
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     const free = connections.find((c) => c.engine === 'FREE_QR');
@@ -52,7 +58,7 @@ export function WhatsAppSetup() {
           const fresh = await api<WhatsappConnection>(`/whatsapp/connections/${free.id}/status`);
           setConnections((cs) => cs.map((c) => (c.id === fresh.id ? { ...c, ...fresh } : c)));
         } catch {
-          /* retry */
+          /* أعد المحاولة */
         }
       }, 3000);
     }
@@ -71,9 +77,9 @@ export function WhatsAppSetup() {
         json: { engine: 'FREE_QR', typingDelayMs, spintaxEnabled },
       });
       setConnections((cs) => [conn, ...cs]);
-      setNotice({ kind: 'ok', text: t.whatsapp.qrCreated });
+      setNotice({ kind: 'ok', text: 'تم إنشاء اتصال QR — المسح الرمز من تطبيق واتساب (الأجهزة المرتبطة).' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.whatsapp.createFailed);
+      setError(err instanceof Error ? err.message : 'فشل إنشاء الاتصال');
     } finally {
       setBusy(false);
     }
@@ -84,7 +90,7 @@ export function WhatsAppSetup() {
     setError(null);
     setNotice(null);
     if (!metaPhoneNumberId.trim() || !metaWabaId.trim() || !metaAccessToken.trim()) {
-      setError(t.whatsapp.metaFieldsRequired);
+      setError('أكمل جميع حقول Meta Token');
       setBusy(false);
       return;
     }
@@ -104,9 +110,9 @@ export function WhatsAppSetup() {
       setMetaPhoneNumberId('');
       setMetaWabaId('');
       setMetaAccessToken('');
-      setNotice({ kind: 'ok', text: t.whatsapp.metaLinked });
+      setNotice({ kind: 'ok', text: 'رُبط المحرك الرسمي (Meta Cloud API) بنجاح.' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.whatsapp.linkFailed);
+      setError(err instanceof Error ? err.message : 'فشل الربط');
     } finally {
       setBusy(false);
     }
@@ -117,7 +123,7 @@ export function WhatsAppSetup() {
       await api(`/whatsapp/connections/${conn.id}/disconnect`, { method: 'POST' });
       load();
     } catch {
-      /* ignore */
+      /* تجاهل */
     }
   }
 
@@ -127,23 +133,23 @@ export function WhatsAppSetup() {
         method: 'PUT',
         json: { typingDelayMs, spintaxEnabled },
       });
-      setNotice({ kind: 'ok', text: t.whatsapp.settingsSaved });
+      setNotice({ kind: 'ok', text: 'حُفظت إعدادات مكافحة الحظر (Anti-Ban).' });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : t.whatsapp.saveFailed });
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'فشل الحفظ' });
     }
   }
 
-  if (loading) return <Spinner label={t.whatsapp.loadingConnections} />;
+  if (loading) return <Spinner label="جارٍ تحميل الاتصالات..." />;
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title={t.whatsapp.title}
-        subtitle={t.whatsapp.subtitle}
+        title="إعدادات الواتساب"
+        subtitle="اربط محركك: QR Code (باقة FREE_QR) أو Meta Cloud API (باقة OFFICIAL_META)"
         actions={
           <Button variant="secondary" onClick={() => window.location.reload()}>
             <RefreshCw className="h-4 w-4" />
-            {t.whatsapp.refresh}
+            تحديث
           </Button>
         }
       />
@@ -160,41 +166,42 @@ export function WhatsAppSetup() {
       )}
 
       {connections.length === 0 ? (
-        <Card title={t.whatsapp.newConnection} hint={t.whatsapp.choosePlan}>
+        /* ——— لا يوجد اتصال بعد — اختيار المحرك ——— */
+        <Card title="ربط جديد" hint="اختر باقة الاتصال المناسبة لعملك">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <button
               onClick={() => setEngine('FREE_QR')}
               className={`rounded-xl border-2 p-4 text-right transition-colors ${
-                engine === 'FREE_QR' ? 'border-ok-500 bg-ok-50' : 'border-[#E5E7EB] hover:border-slate-300'
+                engine === 'FREE_QR' ? 'border-ok-500 bg-ok-50' : 'border-slate-200 hover:border-slate-300'
               }`}
             >
               <QrCode className="h-6 w-6 text-ok-600" />
-              <p className="mt-2 text-sm font-semibold text-[#111111]">{t.whatsapp.freeQrTitle}</p>
-              <p className="mt-1 text-xs text-[#667085]">
-                {t.whatsapp.freeQrDesc}
+              <p className="mt-2 text-sm font-semibold text-slate-800">المحرك الحر — QR Code</p>
+              <p className="mt-1 text-xs text-slate-500">
+                مسح QR من جهازك مباشرة. ردود تلقائية على الرسائل الواردة فقط مع Anti-Ban (تأخير كتابة 3–5 ثوانٍ + Spintax).
               </p>
             </button>
             <button
               onClick={() => setEngine('OFFICIAL_META')}
               className={`rounded-xl border-2 p-4 text-right transition-colors ${
-                engine === 'OFFICIAL_META' ? 'border-brand-500 bg-brand-50' : 'border-[#E5E7EB] hover:border-slate-300'
+                engine === 'OFFICIAL_META' ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-slate-300'
               }`}
             >
-              <MessageCircle className="h-6 w-6 text-brand-500" />
-              <p className="mt-2 text-sm font-semibold text-[#111111]">{t.whatsapp.metaTitle}</p>
-              <p className="mt-1 text-xs text-[#667085]">
-                {t.whatsapp.metaDesc}
+              <MessageCircle className="h-6 w-6 text-brand-600" />
+              <p className="mt-2 text-sm font-semibold text-slate-800">Meta Cloud API الرسمي</p>
+              <p className="mt-1 text-xs text-slate-500">
+                للشركات والحملات الجماعية. يتطلب Phone Number ID و WABA ID و Access Token من Meta Business.
               </p>
             </button>
           </div>
 
-          <div className="mt-5 border-t border-[#E5E7EB] pt-5">
+          <div className="mt-5 border-t border-slate-100 pt-5">
             {engine === 'FREE_QR' ? (
               <div className="flex items-center justify-between">
-                <p className="text-sm text-[#667085]">{t.whatsapp.createQrPrompt}</p>
+                <p className="text-sm text-slate-600">أنشئ اتصال QR وستظهر الرموز للمسح فورًا.</p>
                 <Button onClick={createFreeQr} loading={busy} variant="success">
                   <QrCode className="h-4 w-4" />
-                  {t.whatsapp.createQr}
+                  إنشاء اتصال QR
                 </Button>
               </div>
             ) : (
@@ -213,7 +220,7 @@ export function WhatsAppSetup() {
                 <div className="flex justify-end">
                   <Button onClick={createMeta} loading={busy}>
                     <MessageCircle className="h-4 w-4" />
-                    {t.whatsapp.linkMetaApi}
+                    ربط Meta API
                   </Button>
                 </div>
               </div>
@@ -221,20 +228,21 @@ export function WhatsAppSetup() {
           </div>
         </Card>
       ) : (
+        /* ——— الاتصالات الحالية ——— */
         <div className="space-y-4">
           {connections.map((conn) => {
-            const st = statusBadge(conn.status, t);
+            const st = statusBadge(conn.status);
             return (
               <Card
                 key={conn.id}
-                title={conn.engine === 'FREE_QR' ? t.whatsapp.freeQrCard : conn.engine === 'OFFICIAL_META' ? t.whatsapp.metaCard : t.whatsapp.hybridCard}
+                title={conn.engine === 'FREE_QR' ? 'المحرك الحر (QR)' : conn.engine === 'OFFICIAL_META' ? 'Meta Cloud API الرسمي' : 'Hybrid'}
                 actions={<Badge tone={st.tone}>{st.label}</Badge>}
               >
                 {conn.engine === 'FREE_QR' && conn.status === 'QR_PENDING' && conn.qrCode && (
                   <div className="flex flex-col items-center gap-2 py-2">
-                    <img src={conn.qrCode} alt="QR" className="h-56 w-56 rounded-xl border border-[#E5E7EB] bg-white p-2" />
-                    <p className="text-sm text-[#667085]">
-                      {t.whatsapp.qrScanInstructions} {conn.qrExpiresAt ? t.whatsapp.qrValid5 : t.whatsapp.qrValidShort}.
+                    <img src={conn.qrCode} alt="QR" className="h-56 w-56 rounded-xl border border-slate-200 bg-white p-2" />
+                    <p className="text-sm text-slate-600">
+                      امسح الرمز من واتساب ← الإعدادات ← الأجهزة المرتبطة. يبقى صالحًا {conn.qrExpiresAt ? '5 دقائق' : 'لوقت قصير'}.
                     </p>
                   </div>
                 )}
@@ -243,12 +251,12 @@ export function WhatsAppSetup() {
 
                 {conn.engine === 'FREE_QR' && conn.status === 'BROKEN' && (
                   <p className="mb-3 rounded-lg bg-warn-50 p-2 text-xs text-warn-600">
-                    {t.whatsapp.browserError}
+                    تعذّر تشغيل المتصفح — تأكد من تثبيت Chromium على الخادم ثم أعد المحاولة.
                   </p>
                 )}
 
-                <div className="mt-3 grid grid-cols-1 gap-4 border-t border-[#E5E7EB] pt-4 sm:grid-cols-3">
-                  <Field label={t.whatsapp.typingDelay} hint={t.whatsapp.typingDelayHint}>
+                <div className="mt-3 grid grid-cols-1 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-3">
+                  <Field label="تأخير الكتابة (مللي ثانية)" hint="مكافحة الحظر — بين 3000 و 5000">
                     <Input
                       type="number"
                       min={3000}
@@ -261,17 +269,17 @@ export function WhatsAppSetup() {
                     <Toggle
                       checked={spintaxEnabled}
                       onChange={setSpintaxEnabled}
-                      label={t.whatsapp.spintax}
-                      hint={t.whatsapp.spintaxHint}
+                      label="Spintax (تنويع النص)"
+                      hint="تقليل تشابه الردود المتكررة"
                     />
                   </div>
                   <div className="flex items-end justify-end gap-2">
                     <Button variant="secondary" onClick={() => saveSettings(conn)}>
-                      {t.whatsapp.saveSettings}
+                      حفظ الإعدادات
                     </Button>
                     <Button variant="danger" onClick={() => disconnect(conn)}>
                       <Unplug className="h-4 w-4" />
-                      {t.whatsapp.disconnectButton}
+                      قطع الاتصال
                     </Button>
                   </div>
                 </div>

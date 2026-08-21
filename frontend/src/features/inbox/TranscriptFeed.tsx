@@ -1,7 +1,6 @@
 import { Bot, UserRound } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { EmptyState } from '@/components/ui';
-import { useI18n } from '@/i18n';
 import type { TranscriptEvent } from '@/lib/types';
 
 /**
@@ -9,7 +8,6 @@ import type { TranscriptEvent } from '@/lib/types';
  * النتائج الجزئية (isFinal=false) تُعرض بخط باهت حتى تتثبت.
  */
 export function TranscriptFeed({ events }: { events: TranscriptEvent[] }) {
-  const { t } = useI18n();
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,8 +17,8 @@ export function TranscriptFeed({ events }: { events: TranscriptEvent[] }) {
   if (events.length === 0) {
     return (
       <EmptyState
-        icon={<UserRound className="h-8 w-8 text-[#98A2B3]" />}
-        text={t.inbox.noTranscriptYet}
+        icon={<UserRound className="h-8 w-8 text-slate-300" />}
+        text="لا يوجد تفريغ بعد — انتظر بدء المحادثة"
       />
     );
   }
@@ -33,15 +31,15 @@ export function TranscriptFeed({ events }: { events: TranscriptEvent[] }) {
         return (
           <div key={ev.id} className={`flex ${isAgent ? 'justify-start' : 'justify-end'}`}>
             {isSystem ? (
-              <p className="max-w-[80%] rounded-lg bg-[#FAFAFA] px-3 py-1.5 text-xs italic text-[#98A2B3]">
+              <p className="max-w-[80%] rounded-lg bg-slate-100 px-3 py-1.5 text-xs italic text-slate-400">
                 {ev.text}
               </p>
             ) : (
               <div
                 className={`flex max-w-[80%] gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                   isAgent
-                    ? 'rounded-tr-sm bg-brand-500 text-white'
-                    : 'rounded-tl-sm bg-[#FAFAFA] text-[#111111]'
+                    ? 'rounded-tr-sm bg-brand-600 text-white'
+                    : 'rounded-tl-sm bg-slate-100 text-slate-800'
                 } ${ev.isFinal ? '' : 'opacity-60'}`}
               >
                 <span className="mt-0.5 shrink-0">

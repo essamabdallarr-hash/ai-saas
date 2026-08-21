@@ -1,16 +1,15 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button, Card, Field, Input, Select } from '@/components/ui';
-import { useI18n } from '@/i18n';
 import type { DynamicField, DynamicFieldType } from '@/lib/types';
 
-const FIELD_TYPES: Array<{ value: DynamicFieldType; labelKey: string }> = [
-  { value: 'TEXT', labelKey: 'dynamicFields.fieldTypes.text' },
-  { value: 'NUMBER', labelKey: 'dynamicFields.fieldTypes.number' },
-  { value: 'DATE', labelKey: 'dynamicFields.fieldTypes.date' },
-  { value: 'BOOLEAN', labelKey: 'dynamicFields.fieldTypes.boolean' },
-  { value: 'SELECT', labelKey: 'dynamicFields.fieldTypes.select' },
-  { value: 'CURRENCY', labelKey: 'dynamicFields.fieldTypes.currency' },
+const FIELD_TYPES: Array<{ value: DynamicFieldType; label: string }> = [
+  { value: 'TEXT', label: 'نص' },
+  { value: 'NUMBER', label: 'رقم' },
+  { value: 'DATE', label: 'تاريخ' },
+  { value: 'BOOLEAN', label: 'نعم/لا' },
+  { value: 'SELECT', label: 'اختيار' },
+  { value: 'CURRENCY', label: 'عملة' },
 ];
 
 function toKey(label: string): string {
@@ -19,6 +18,7 @@ function toKey(label: string): string {
     .trim()
     .replace(/\s+/g, '_')
     .toLowerCase();
+  // لأسماء عربية نولّد مفتاحًا مقروءًا بالحروف اللاتينية عند الإمكان، وإلا نستخدم الإنجليزية
   const map: Record<string, string> = {
     الميزانية: 'budget',
     'موعد الحجز': 'appointment_date',
@@ -40,7 +40,6 @@ export function DynamicFieldsManager({
   fields: DynamicField[];
   onChange: (fields: DynamicField[]) => void;
 }) {
-  const { t } = useI18n();
   const [label, setLabel] = useState('');
   const [type, setType] = useState<DynamicFieldType>('TEXT');
   const [required, setRequired] = useState(false);
@@ -50,7 +49,7 @@ export function DynamicFieldsManager({
     if (!label.trim()) return;
     const key = toKey(label);
     if (fields.some((f) => f.key === key)) {
-      window.alert(t.dynamicFields.duplicateAlert(key));
+      window.alert(`المفتاح "${key}" موجود مسبقًا — عدّل التسمية أو غيّرها.`);
       return;
     }
     const next: DynamicField[] = [
@@ -92,18 +91,18 @@ export function DynamicFieldsManager({
 
   return (
     <Card
-      title={t.dynamicFields.title}
-      hint={t.dynamicFields.hint}
+      title="الحقول الديناميكية (Data Extraction)"
+      hint="البيانات التي يستخرجها البوت في نهاية كل مكالمة"
       actions={
-        <span className="text-xs text-[#98A2B3]">
-          {t.dynamicFields.activeCount(fields.filter((f) => f.enabled).length)}
+        <span className="text-xs text-slate-400">
+          {fields.filter((f) => f.enabled).length} حقل نشط
         </span>
       }
     >
       <div className="space-y-3">
         {fields.length === 0 && (
-          <p className="rounded-lg bg-[#FAFAFA] p-3 text-xs text-[#667085]">
-            {t.dynamicFields.empty}
+          <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+            لا توجد حقول بعد. أضف ما تريد أن يستخرجه البوت، مثال: الميزانية، موعد الحجز، نتيجة التفاوض.
           </p>
         )}
 
@@ -111,26 +110,26 @@ export function DynamicFieldsManager({
           <div
             key={field.id}
             className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${
-              field.enabled ? 'border-[#E5E7EB]' : 'border-dashed border-[#98A2B3] opacity-60'
+              field.enabled ? 'border-slate-200' : 'border-dashed border-slate-300 opacity-60'
             }`}
           >
             <div>
-              <p className="text-sm font-medium text-[#111111]">
+              <p className="text-sm font-medium text-slate-800">
                 {field.label}
                 {field.required && <span className="mr-1 text-danger-600">*</span>}
               </p>
-              <p className="text-xs text-[#667085]" dir="ltr">
-                [{field.key}] · {t.dynamicFields.fieldTypes[field.type.toLowerCase() as keyof typeof t.dynamicFields.fieldTypes]}
+              <p className="text-xs text-slate-500" dir="ltr">
+                [{field.key}] · {FIELD_TYPES.find((t) => t.value === field.type)?.label}
               </p>
               {field.description && (
-                <p className="mt-0.5 text-xs text-[#98A2B3]">{field.description}</p>
+                <p className="mt-0.5 text-xs text-slate-400">{field.description}</p>
               )}
             </div>
             <div className="flex items-center gap-1">
-              <button className="rounded p-1 text-[#98A2B3] hover:bg-[#FAFAFA]" onClick={() => move(field.id, -1)}>
+              <button className="rounded p-1 text-slate-400 hover:bg-slate-100" onClick={() => move(field.id, -1)}>
                 <ArrowUp className="h-4 w-4" />
               </button>
-              <button className="rounded p-1 text-[#98A2B3] hover:bg-[#FAFAFA]" onClick={() => move(field.id, 1)}>
+              <button className="rounded p-1 text-slate-400 hover:bg-slate-100" onClick={() => move(field.id, 1)}>
                 <ArrowDown className="h-4 w-4" />
               </button>
               <button
@@ -143,43 +142,44 @@ export function DynamicFieldsManager({
           </div>
         ))}
 
+        {/* نموذج إضافة حقل */}
         <div className="grid grid-cols-1 gap-3 rounded-lg border border-dashed border-brand-300 bg-brand-50/40 p-3 sm:grid-cols-4">
-          <Field label={t.dynamicFields.labelField}>
+          <Field label="التسمية">
             <Input
               value={label}
-              placeholder={t.dynamicFields.labelPlaceholder}
+              placeholder="مثال: الميزانية"
               onChange={(e) => setLabel(e.target.value)}
             />
           </Field>
-          <Field label={t.dynamicFields.typeField}>
+          <Field label="النوع">
             <Select value={type} onChange={(e) => setType(e.target.value as DynamicFieldType)}>
-              {FIELD_TYPES.map((ft) => (
-                <option key={ft.value} value={ft.value}>
-                  {t.dynamicFields.fieldTypes[ft.value.toLowerCase() as keyof typeof t.dynamicFields.fieldTypes]}
+              {FIELD_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
                 </option>
               ))}
             </Select>
           </Field>
-          <Field label={t.dynamicFields.descriptionField}>
+          <Field label="وصف للبوت">
             <Input
               value={description}
-              placeholder={t.dynamicFields.descriptionPlaceholder}
+              placeholder="الحد الأقصى الذي يقبله العميل"
               onChange={(e) => setDescription(e.target.value)}
             />
           </Field>
           <div className="flex items-end justify-between gap-2">
-            <label className="flex items-center gap-2 text-sm text-[#667085]">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
               <input
                 type="checkbox"
                 checked={required}
                 onChange={(e) => setRequired(e.target.checked)}
-                className="h-4 w-4 accent-brand-500"
+                className="h-4 w-4 accent-brand-600"
               />
-              {t.dynamicFields.required}
+              إجباري
             </label>
             <Button size="sm" onClick={addField}>
               <Plus className="h-4 w-4" />
-              {t.dynamicFields.add}
+              إضافة
             </Button>
           </div>
         </div>

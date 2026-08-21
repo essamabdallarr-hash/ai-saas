@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OmnichannelLiveInbox } from './OmnichannelLiveInbox';
 import { api } from '@/lib/api';
 import { LiveSocket } from '@/lib/ws';
-import { I18nProvider } from '@/i18n';
 import type { Call, Conversation, WhatsappMessage } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
@@ -99,7 +98,7 @@ describe('OmnichannelLiveInbox', () => {
   it('يعرض المحادثات المحمّلة من الـ API مع حالة اتصال الواتساب', async () => {
     mockRoutes({ '/conversations': [voiceConversation, waConversation], '/whatsapp/connections': [] });
 
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
 
     expect(await screen.findByText(/2 محادثة نشطة/)).toBeInTheDocument();
     expect(screen.getAllByText('+201001002030').length).toBeGreaterThan(0);
@@ -110,7 +109,7 @@ describe('OmnichannelLiveInbox', () => {
   it('تحديث لحظي عبر WebSocket: conversation.open يضيف محادثة و message.new يضيف رسالة', async () => {
     mockRoutes({ '/conversations': [waConversation], '/whatsapp/connections': [] });
 
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
     await screen.findByText(/1 محادثة نشطة/);
 
     const msg: WhatsappMessage = {
@@ -138,10 +137,10 @@ describe('OmnichannelLiveInbox', () => {
     mockRoutes({ '/conversations': [waConversation], '/whatsapp/connections': [] });
 
     const user = userEvent.setup();
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
     expect((await screen.findAllByText('+201001002031')).length).toBeGreaterThan(0);
 
-    await user.type(screen.getByPlaceholderText('اكتب ردًا...'), 'حاضر، هيوصلك عرض السعر قريبًا');
+    await user.type(screen.getByPlaceholderText('اكتب ردًا على العميل...'), 'حاضر، هيوصلك عرض السعر قريبًا');
     await user.click(screen.getByRole('button', { name: '' }));
 
     expect(WSMock.sent).toContainEqual({
@@ -155,38 +154,38 @@ describe('OmnichannelLiveInbox', () => {
     mockRoutes({ '/conversations': [voiceConversation], '/whatsapp/connections': [] });
 
     const user = userEvent.setup();
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
     expect((await screen.findAllByText('+201001002030')).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole('button', { name: /تحويل بشري/ }));
-    expect(screen.getByText('تأكيد التحويل')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Human Takeover/ }));
+    expect(screen.getByText('تأكيد التحويل البشري')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'تحويل الآن' }));
 
     expect(WSMock.sent).toContainEqual({ type: 'takeover.request', conversationId: 'conv-1' });
-    expect(await screen.findByText(/الاستمرار كبشري/)).toBeInTheDocument();
+    expect(await screen.findByText(/استكمل المحادثة كبشري/)).toBeInTheDocument();
   });
 
   it('takeover.start عبر WebSocket يحدّث الحالة ويعرض اسم المحوّل', async () => {
     mockRoutes({ '/conversations': [voiceConversation], '/whatsapp/connections': [] });
 
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
     expect((await screen.findAllByText('+201001002030')).length).toBeGreaterThan(0);
 
     act(() => {
       WSMock.emit({ type: 'takeover.start', callId: 'call-1', takenByName: 'أحمد' });
     });
 
-    expect(await screen.findByText(/التحويل البشري: أحمد/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /تحويل بشري/ })).not.toBeInTheDocument();
+    expect(await screen.findByText(/تحويل بشري: أحمد/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Human Takeover/ })).not.toBeInTheDocument();
   });
 
   it('حالة فارغة: لا توجد محادثات نشطة', async () => {
     mockRoutes({ '/conversations': [], '/whatsapp/connections': [] });
 
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
 
-    expect(await screen.findByText('لا توجد محادثات نشطة')).toBeInTheDocument();
+    expect(await screen.findByText('لا توجد محادثات نشطة الآن')).toBeInTheDocument();
     expect(screen.getByText(/0 محادثة نشطة/)).toBeInTheDocument();
   });
 
@@ -194,13 +193,13 @@ describe('OmnichannelLiveInbox', () => {
     const user = userEvent.setup();
     mockRoutes({ '/conversations': [voiceConversation], '/whatsapp/connections': [], '/conversations/conv-1/close': { ok: true } });
 
-    render(<I18nProvider><OmnichannelLiveInbox /></I18nProvider>);
+    render(<OmnichannelLiveInbox />);
     expect((await screen.findAllByText('+201001002030')).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole('button', { name: /إنهاء وإغلاق/ }));
+    await user.click(screen.getByRole('button', { name: /إنهاء المحادثة/ }));
 
     expect(apiMock).toHaveBeenCalledWith('/conversations/conv-1/close', { method: 'POST' });
-    expect(await screen.findByText('لا توجد محادثات نشطة')).toBeInTheDocument();
+    expect(await screen.findByText('لا توجد محادثات نشطة الآن')).toBeInTheDocument();
     expect(screen.getByText(/0 محادثة نشطة/)).toBeInTheDocument();
   });
 });

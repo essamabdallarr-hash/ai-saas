@@ -1,7 +1,6 @@
 import { BookOpen, Database, FileText, KeyRound, Save, Settings } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { useI18n } from '@/i18n';
 import { Button, Card, Field, Input, PageHeader, Spinner, Textarea, Toggle, Badge } from '@/components/ui';
 import { DynamicFieldsManager } from './DynamicFieldsManager';
 import { VoicePicker } from './VoicePicker';
@@ -9,6 +8,7 @@ import type { Agent, DynamicField } from '@/lib/types';
 
 type Tab = 'general' | 'knowledge' | 'fields';
 
+// وكيل افتراضي ليُعرض قبل توفر الـ Backend (Step 3)
 const DRAFT_AGENT: Agent = {
   id: 'draft',
   tenantId: '',
@@ -33,7 +33,6 @@ const DRAFT_AGENT: Agent = {
 };
 
 export function AgentBuilder() {
-  const { t } = useI18n();
   const [agent, setAgent] = useState<Agent>(DRAFT_AGENT);
   const [tab, setTab] = useState<Tab>('general');
   const [loading, setLoading] = useState(true);
@@ -41,9 +40,10 @@ export function AgentBuilder() {
   const [notice, setNotice] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
 
   useEffect(() => {
+    // Step 3: GET /agents/:id (عبر Super Admin أو CLIENT_ADMIN)
     api<Agent>('/agents/current')
       .then((data) => setAgent(data))
-      .catch(() => setNotice({ kind: 'error', text: t.agentBuilder.loadError }))
+      .catch(() => setNotice({ kind: 'error', text: 'تعذر تحميل الوكيل من الخادم — يعرض وضع التجربة.' }))
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,45 +55,47 @@ export function AgentBuilder() {
     setSaving(true);
     setNotice(null);
     try {
+      // Step 3: PUT /agents/:id — يُخزّن ولا يُرسل systemPrompt (يُحقن من Backend فقط)
       await api<Agent>(`/agents/${agent.id}`, { method: 'PUT', json: agent });
-      setNotice({ kind: 'ok', text: t.agentBuilder.saveSuccess });
+      setNotice({ kind: 'ok', text: 'تم حفظ الوكيل بنجاح.' });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : t.agentBuilder.saveFailed });
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'فشل الحفظ' });
     } finally {
       setSaving(false);
     }
   }
 
   const tabs: Array<{ id: Tab; label: string; icon: typeof Settings }> = [
-    { id: 'general', label: t.agentBuilder.tabs.general, icon: Settings },
-    { id: 'knowledge', label: t.agentBuilder.tabs.knowledge, icon: BookOpen },
-    { id: 'fields', label: t.agentBuilder.tabs.fields, icon: Database },
+    { id: 'general', label: 'الإعدادات العامة', icon: Settings },
+    { id: 'knowledge', label: 'قاعدة المعرفة (RAG)', icon: BookOpen },
+    { id: 'fields', label: 'استخراج البيانات', icon: Database },
   ];
 
-  if (loading) return <Spinner label={t.agentBuilder.loading} />;
+  if (loading) return <Spinner label="جارٍ تحميل الوكيل..." />;
 
   return (
     <div>
       <PageHeader
-        title={t.agentBuilder.title}
-        subtitle={t.agentBuilder.subtitle}
+        title="باني الوكيل"
+        subtitle="أنشئ سلوك بوتك الصوتي واربطه بمعلومات شركتك"
         actions={
           <Button onClick={save} loading={saving}>
             <Save className="h-4 w-4" />
-            {t.agentBuilder.save}
+            حفظ
           </Button>
         }
       />
 
-      <div className="mb-5 flex gap-1 border-b border-[#E5E7EB]">
+      {/* شريط التبويبات */}
+      <div className="mb-5 flex gap-1 border-b border-slate-200">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
               tab === t.id
-                ? 'border-brand-500 text-brand-500'
-                : 'border-transparent text-[#667085] hover:text-[#111111]'
+                ? 'border-brand-600 text-brand-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <t.icon className="h-4 w-4" />
@@ -114,16 +116,17 @@ export function AgentBuilder() {
         </div>
       )}
 
+      {/* ——— الإعدادات العامة ——— */}
       {tab === 'general' && (
         <div className="space-y-5">
-          <Card title={t.agentBuilder.identity}>
+          <Card title="هوية الوكيل">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={t.agentBuilder.botName}>
+              <Field label="اسم البوت">
                 <Input value={agent.name} onChange={(e) => patch({ name: e.target.value })} />
               </Field>
-              <Field label={t.agentBuilder.language}>
+              <Field label="اللغة">
                 <select
-                  className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
                   value={agent.language}
                   onChange={(e) => patch({ language: e.target.value })}
                 >
@@ -132,30 +135,30 @@ export function AgentBuilder() {
                 </select>
               </Field>
               <div className="sm:col-span-2">
-                <Field label={t.agentBuilder.objective} hint={t.agentBuilder.objectiveHint}>
+                <Field label="الهدف (Objective)" hint="مثال: بيع اشتراكات الإنترنت وتجهيز مواعيد التركيب">
                   <Textarea
                     value={agent.objective}
                     onChange={(e) => patch({ objective: e.target.value })}
-                    placeholder={t.agentBuilder.objectivePlaceholder}
+                    placeholder="ما الذي يجب أن يحققه البوت في كل مكالمة؟"
                   />
                 </Field>
               </div>
             </div>
           </Card>
 
-          <Card title={t.agentBuilder.voiceAndModels}>
+          <Card title="الصوت والنماذج">
             <VoicePicker voiceId={agent.voiceId} onChange={(voiceId) => patch({ voiceId })} />
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="STT" hint={t.agentBuilder.sttHint}>
+              <Field label="STT" hint="مع Silero VAD محليًا">
                 <Input value={agent.sttProvider} readOnly />
               </Field>
               <Field label="LLM">
                 <Input value={agent.llmModel} readOnly />
               </Field>
-              <Field label={t.agentBuilder.handoffNumber}>
+              <Field label="رقم التحويل للبشري">
                 <Input
                   value={agent.fallbackPhoneNumber ?? ''}
-                  placeholder={t.agentBuilder.handoffNumberPlaceholder}
+                  placeholder="مثال: 01000000000"
                   dir="ltr"
                   onChange={(e) => patch({ fallbackPhoneNumber: e.target.value })}
                 />
@@ -163,48 +166,50 @@ export function AgentBuilder() {
             </div>
           </Card>
 
-          <Card title={t.agentBuilder.interactionBehavior}>
+          <Card title="سلوك التفاعل">
             <div className="space-y-4">
               <Toggle
                 checked={agent.sileroVadEnabled}
                 onChange={(v) => patch({ sileroVadEnabled: v })}
-                label="Silero VAD"
-                hint={t.agentBuilder.sileroHint}
+                label="Silero VAD (فلترة الصمت)"
+                hint="عدم إرسال الصمت للـ Deepgram — يخفض التكلفة"
               />
               <Toggle
                 checked={agent.bargeInEnabled}
                 onChange={(v) => patch({ bargeInEnabled: v })}
-                label={t.agentBuilder.bargeIn}
-                hint={t.agentBuilder.bargeInHint}
+                label="المقاطعة (Barge-in)"
+                hint="يتوقف البوت فورًا عند حديث العميل أثناء الرد"
               />
               <Toggle
                 checked={agent.smartTtsCacheEnabled}
                 onChange={(v) => patch({ smartTtsCacheEnabled: v })}
                 label="Smart TTS Caching"
-                hint={t.agentBuilder.ttsCacheHint}
+                hint="تخزين الجمل المتكررة صوتيًا في السيرفر لتقليل توليد Azure"
               />
             </div>
           </Card>
         </div>
       )}
 
+      {/* ——— قاعدة المعرفة (قراءة فقط — الإدارة من بوابة الإدارة المركزية) ——— */}
       {tab === 'knowledge' && (
         <div className="space-y-5">
-          <Card title={t.agentBuilder.companyDocs} hint={t.agentBuilder.companyDocsHint}>
+          <Card title="مستندات الشركة" hint="رفع ملفات قاعدة المعرفة (RAG) يتم من بوابة الإدارة المركزية (AI Studio) فقط">
             {agent.documents.length === 0 ? (
-              <p className="rounded-lg bg-[#FAFAFA] p-4 text-sm text-[#667085]">
-                {t.agentBuilder.noDocs}
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+                لم تُرفع مستندات بعد. يتولّى فريق الدعم من بوابة الإدارة المركزية رفع كتالوج منتجاتك
+                وأسعارك ليحوّلها النظام إلى Embeddings ويستخدمها للرد على أسئلة العملاء (RAG).
               </p>
             ) : (
-              <ul className="divide-y divide-[#E5E7EB]">
+              <ul className="divide-y divide-slate-100">
                 {agent.documents.map((doc) => (
                   <li key={doc.id} className="flex items-center justify-between py-2">
-                    <span className="flex items-center gap-2 text-sm text-[#111111]">
-                      <FileText className="h-4 w-4 text-[#98A2B3]" />
+                    <span className="flex items-center gap-2 text-sm text-slate-700">
+                      <FileText className="h-4 w-4 text-slate-400" />
                       {doc.name}
                     </span>
                     <Badge tone={doc.status === 'READY' ? 'green' : doc.status === 'FAILED' ? 'red' : 'amber'}>
-                      {doc.status === 'READY' ? t.agentBuilder.statusReady : doc.status === 'FAILED' ? t.agentBuilder.statusFailed : t.agentBuilder.statusProcessing}
+                      {doc.status === 'READY' ? 'جاهز' : doc.status === 'FAILED' ? 'فشل' : 'قيد المعالجة'}
                     </Badge>
                   </li>
                 ))}
@@ -214,6 +219,7 @@ export function AgentBuilder() {
         </div>
       )}
 
+      {/* ——— الحقول الديناميكية ——— */}
       {tab === 'fields' && (
         <div className="space-y-4">
           <DynamicFieldsManager
@@ -222,7 +228,8 @@ export function AgentBuilder() {
           />
           <p className="flex items-start gap-2 rounded-lg border border-warn-500/30 bg-warn-50 p-3 text-xs text-warn-600">
             <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
-            {t.agentBuilder.systemPromptNote}
+            نظام الأوامر الأساسي (System Prompt) وسلوك البوت العام يُداران من بوابة الإدارة المركزية
+            (Prompt Studio) ولا يظهران للعميل النهائي. أي سلوك خاص بعملك يُدمج هنا آليًا في الـ Backend.
           </p>
         </div>
       )}
