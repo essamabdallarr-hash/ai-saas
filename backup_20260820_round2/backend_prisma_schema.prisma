@@ -1,0 +1,763 @@
+// ============================================================
+// Universal AI Agent SaaS — Database Schema (Multi-Tenant)
+// Provider: PostgreSQL + pgvector
+// ============================================================
+// متطلبات مسبقة في قاعدة البيانات:
+//   CREATE EXTENSION IF NOT EXISTS "pgcrypto"; (اختياري)
+//   CREATE EXTENSION IF NOT EXISTS vector;      (للتشغيل يجب)
+//
+// ملاحظة: التنفيذ الصارم للـ Tenant Isolation يتم في طبقة الخدمة
+// (كل Query يمر عبر requireTenant(prisma, tenantId)) أو عبر RLS لاحقًا.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum TenantStatus {
+  ACTIVE
+  TRIAL
+  SUSPENDED
+  CANCELLED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  CLIENT_ADMIN
+  CLIENT_AGENT
+}
+
+enum AgentStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
+enum VoiceProvider {
+  AZURE
+  ELEVENLABS
+  CARTESIA
+  OPENAI
+}
+
+enum CallChannel {
+  VOICE
+  WHATSAPP
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  TRANSFERRED_TO_HUMAN
+}
+
+enum Speaker {
+  CUSTOMER
+  AGENT
+  SYSTEM
+}
+
+enum DynamicFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  CURRENCY
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum WhatsappEngine {
+  FREE_QR
+  OFFICIAL_META
+  HYBRID
+}
+
+enum WhatsappConnectionStatus {
+  DISCONNECTED
+  QR_PENDING
+  CONNECTED
+  BROKEN
+  BANNED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  BLOCKED
+}
+
+enum ConversationChannel {
+  VOICE
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+  HUMAN_TAKEOVER
+}
+
+// دور المتحدث في المحادثة الموحدة (Omnichannel)
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  HUMAN
+}
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  TAKE_OVER
+  TOGGLE_FEATURE
+  BILLING_CHANGE
+}
+
+enum CustomerBotStatus {
+  PENDING
+  DONE
+  DID_NOT_ANSWER
+}
+
+enum CampaignType {
+  VOICE
+  CHAT
+  BOTH
+}
+
+// ============================================================
+// Tenancy / Billing / Features
+// ============================================================
+
+model Tenant {
+  id              String       @id @default(cuid())
+  name            String
+  slug            String       @unique
+  status          TenantStatus @default(TRIAL)
+  currency        String       @default("USD")
+  // مفتاح OpenAI الخاص بالعميل (مشفر AES-256-GCM عند التخزين) — يسبق مفتاح المنصة
+  openaiApiKeyEnc String?
+  // نموذج LLM مخصص للعميل (اختياري) — يسبق نموذج المنصة الافتراضي
+  openaiModel     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tierLimit            TierLimit?
+  featureToggles       FeatureToggle?
+  users                User[]
+  agents               Agent[]
+  dynamicFields        DynamicField[]
+  extractedValues      ExtractedValue[]
+  transcriptEvents     TranscriptEvent[]
+  documents            KnowledgeDocument[]
+  chunks               KnowledgeChunk[]
+  calls                Call[]
+  conversations        Conversation[]
+  whatsappConnections  WhatsappConnection[]
+  messages             WhatsappMessage[]
+  conversationMessages ConversationMessage[]
+  campaigns            BroadcastCampaign[]
+  ttsCache             TtsCache[]
+  usage                UsageLedger[]
+  audits               AuditLog[]
+  customers            Customer[]
+  outcomes             TenantOutcome[]
+  uploadBatches        UploadBatch[]
+  campaignsNew         Campaign[]
+
+  @@index([status])
+}
+
+// حدود الباقة الشهرية (Tier Limits) — تقاس بالدقائق والرسائل
+model TierLimit {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  tierName            String @default("starter") // starter | pro | enterprise
+  monthlyVoiceMinutes Int    @default(500)
+  monthlyWhatsAppMsgs Int    @default(500)
+  maxConcurrentCalls  Int    @default(3)
+  maxSeats            Int    @default(3)
+  monthlyPriceUsd     Float  @default(99)
+  overagePerMinuteUsd Float  @default(0.04)
+  overagePerMsgUsd    Float  @default(0.01)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// مفاتيح التفعيل (Feature Toggles) — يتحكم بها Super Admin فقط
+model FeatureToggle {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  voiceAiEnabled         Boolean @default(true)
+  freeWhatsAppEnabled    Boolean @default(true) // محرك QR (مقيد بالرد فقط)
+  officialMetaApiEnabled Boolean @default(false) // محرك Meta الرسمي + الحملات
+  ragEnabled             Boolean @default(true) // Knowledge Base
+  dataExtractionEnabled  Boolean @default(true)
+  liveInboxEnabled       Boolean @default(true)
+  humanTakeoverEnabled   Boolean @default(true)
+  ttsSmartCacheEnabled   Boolean @default(true)
+  sileroVadEnabled       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String? // إلزامي في الإنتاج — فارغ في وضع التطوير
+  name         String
+  role         UserRole @default(CLIENT_AGENT)
+
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  active      Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // المكالمات/المحادثات الموكلة له عند الـ Human Takeover
+  assignedConversations Conversation[] @relation("AssignedHuman")
+  takenOverCalls        Call[]         @relation("CallTakenOver")
+
+  @@index([tenantId])
+  @@index([role])
+}
+
+// ============================================================
+// AI Agent (Bot)
+// ============================================================
+
+model Agent {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name      String
+  status    AgentStatus @default(DRAFT)
+  language  String      @default("ar")
+  objective String      @default("")
+
+  // —— الصوت والنماذج ——
+  voiceProvider VoiceProvider @default(AZURE)
+  voiceId       String        @default("ar-EG-SalmaNeural")
+  voiceRate     Float         @default(1.0)
+  sttProvider   String        @default("deepgram")
+  llmProvider   String        @default("openai")
+  llmModel      String        @default("gpt-4o-mini")
+
+  // —— السلوك ——
+  sileroVadEnabled      Boolean @default(true)
+  bargeInEnabled        Boolean @default(true)
+  smartTtsCacheEnabled  Boolean @default(true)
+  fallbackPhoneNumber   String? // رقم التحويل للبشري عند الفشل
+  maxTurnsBeforeHandoff Int     @default(6)
+
+  // —— Prompt مخفي (يُكتب من Super Admin فقط عبر Prompt Studio) ——
+  systemPrompt  String @default("")
+  promptVersion Int    @default(1)
+
+  config    Json? // إعدادات إضافية (مثال: opening_greeting, closing_script)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dynamicFields DynamicField[]
+  documents     KnowledgeDocument[]
+  calls         Call[]
+  conversations Conversation[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+// ============================================================
+// Dynamic Data Extraction (حقول ديناميكية يطلبها العميل)
+// مثال: [الميزانية] [موعد الحجز] [نتيجة التفاوض]
+// ============================================================
+
+model DynamicField {
+  id       String  @id @default(cuid())
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentId  String?
+  agent    Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  label        String // الاسم الظاهر للعميل: "الميزانية"
+  key          String // المفتاح البرمجي: budget
+  type         DynamicFieldType @default(TEXT)
+  description  String? // إرشاد للبوت: "القيمة المالية القصوى التي يقبلها العميل"
+  exampleValue String? // قيمة مثال لتدريب الاستخراج
+  required     Boolean          @default(false)
+  position     Int              @default(0)
+  enabled      Boolean          @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  extracted ExtractedValue[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+// القيم المستخرجة الفعلية لكل محادثة (مكالمة صوتية أو واتساب)
+model ExtractedValue {
+  id             String       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fieldId        String
+  field          DynamicField @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+
+  value      String
+  confidence Float? // 0..1 ثقة الاستخراج
+  rawQuote   String? // الاقتباس النصي من المحادثة
+  createdAt  DateTime @default(now())
+
+  @@unique([conversationId, fieldId])
+  @@index([tenantId])
+  @@index([conversationId])
+}
+
+// ============================================================
+// RAG — Knowledge Base (PDF / Excel / TXT → Embeddings)
+// ============================================================
+
+model KnowledgeDocument {
+  id       String  @id @default(cuid())
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentId  String?
+  agent    Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  name       String
+  fileUrl    String // مسار التخزين (S3 / حجم محلي)
+  fileType   String // pdf | xlsx | txt
+  fileSize   Int            @default(0)
+  status     DocumentStatus @default(UPLOADED)
+  chunkCount Int            @default(0)
+  error      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  chunks KnowledgeChunk[]
+
+  @@index([tenantId])
+}
+
+// شظايا النصوص + متجهاتها (pgvector). تُستخدم في البحث الدلالي.
+model KnowledgeChunk {
+  id         String            @id @default(cuid())
+  tenantId   String
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  documentId String
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  content    String
+  chunkIndex Int                          @default(0)
+  metadata   Json? // مثال: { page: 3, source: "catalog.pdf" }
+  embedding  Unsupported("vector(1536)")? // 1536 = OpenAI text-embedding-3-small
+
+  @@index([tenantId])
+  @@index([documentId])
+}
+
+// ============================================================
+// المكالمات الصوتية + التفريغ اللحظي
+// ============================================================
+
+model Call {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentId        String?
+  agent          Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  channel      CallChannel   @default(VOICE)
+  direction    CallDirection @default(INBOUND)
+  callerNumber String? // رقم العميل
+  status       CallStatus    @default(RINGING)
+
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  durationSec Int       @default(0)
+
+  // — التكاليف (تُحسب في Backend) —
+  sttMinutes        Float @default(0) // دقائق صوت فعلي بعد فلترة VAD
+  ttsGeneratedChars Int   @default(0) // حروف تُولّد جديدًا
+  ttsCachedHits     Int   @default(0) // مرات إعادة استخدام الكاش
+  apiCostUsd        Float @default(0) // إجمالي التكلفة التقديرية بالدولار
+
+  // — المحتوى —
+  transcript    String? // نص التفريغ الكامل
+  aiSummary     String? // ملخص المكالمة (AI)
+  extractedData Json? // { budget: "5000", appointment: "2026-08-20" } — لسهولة عمل التقارير
+  audioUrl      String? // رابط التشغيل
+  audioPath     String? // مفتاح التخزين
+
+  // — Human Takeover —
+  takeoverAt    DateTime?
+  takenOverById String?
+  takenOverBy   User?     @relation("CallTakenOver", fields: [takenOverById], references: [id], onDelete: SetNull)
+
+  events TranscriptEvent[]
+  meta   Json? // rapidaConversationId + بيانات داخلية إضافية
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, startedAt])
+}
+
+// حدث تفريغ لحظي (يُبث عبر WebSocket إلى Live Inbox)
+model TranscriptEvent {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  callId   String
+  call     Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  speaker   Speaker  @default(CUSTOMER)
+  text      String
+  isFinal   Boolean  @default(false) // false = نتيجة جزئية في منتصف الجملة
+  createdAt DateTime @default(now())
+
+  @@index([callId])
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+// WhatsApp — المحرك المزدوج
+// ============================================================
+
+model WhatsappConnection {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  engine WhatsappEngine           @default(FREE_QR)
+  status WhatsappConnectionStatus @default(DISCONNECTED)
+
+  // — المحرك الحر (whatsapp-web.js QR) —
+  qrCode      String? // محتوى QR (يُرسل للواجهة ليُمسح)
+  qrExpiresAt DateTime?
+  sessionData Json? // جلسة web.js مشفرة (SessionData)
+
+  // — المحرك الرسمي (Meta Cloud API) —
+  metaPhoneNumberId  String?
+  metaAccessTokenEnc String? // مشفر (يُفك في Backend فقط)
+  metaWabaId         String?
+
+  // — إعدادات مكافحة الحظر (Anti-Ban) —
+  typingDelayMs   Int     @default(4000) // 3-5 ثوانٍ تأخير الكتابة
+  spintaxEnabled  Boolean @default(true)
+  outboundBlocked Boolean @default(true) // المحرك الحر: ردود فقط، لا حملات
+
+  lastHeartbeatAt DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  messages  WhatsappMessage[]
+  campaigns BroadcastCampaign[]
+
+  @@index([tenantId])
+}
+
+model WhatsappMessage {
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connectionId   String
+  connection     WhatsappConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   Conversation?      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  waMessageId    String?
+  direction      MessageDirection @default(INBOUND)
+  body           String
+  templateName   String? // للحملات الرسمية فقط
+  status         MessageStatus    @default(QUEUED)
+  spintaxVariant Int              @default(0) // متغير Spintax المستخدم
+  error          String?
+  sentAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId])
+  @@index([tenantId, createdAt])
+}
+
+// حملة الرسائل الرسمية (Meta Template Messages) — Outbound Broadcasts
+model BroadcastCampaign {
+  id           String             @id @default(cuid())
+  tenantId     String
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connectionId String
+  connection   WhatsappConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  name             String
+  templateName     String
+  status           CampaignStatus @default(DRAFT)
+  totalRecipients  Int            @default(0)
+  sentCount        Int            @default(0)
+  failedCount      Int            @default(0)
+  metaTemplateJson Json? // المعاملات (Variables) المرسلة للـ Template
+  meta             Json? // قائمة المستلمين { to, variables[] }
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime       @default(now())
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// المحادثات الموحدة (Omnichannel Inbox)
+// ============================================================
+
+model Conversation {
+  id       String              @id @default(cuid())
+  tenantId String
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel  ConversationChannel @default(VOICE)
+  status   ConversationStatus  @default(OPEN)
+
+  contactNumber String
+  contactName   String?
+  agentId       String?
+  agent         Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  assignedToId  String? // موظف بشري عند الـ Takeover
+  assignedTo    User?   @relation("AssignedHuman", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  summary String? // ملخص المحادثة بعد انتهائها
+
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  calls            Call[]
+  whatsappMessages WhatsappMessage[]
+  messages         ConversationMessage[]
+  extractedValues  ExtractedValue[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, lastMessageAt])
+  @@index([customerId])
+}
+
+// الرسائل الموحدة لكل القنوات (الصوت + الواتساب + الويب) — مصدر الـ LiveInbox
+model ConversationMessage {
+  id             String       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role      MessageRole @default(USER)
+  content   String
+  provider  String? // 'openai' | 'webjs' | 'meta' | 'rapida' | 'human'
+  meta      Json? // مثال: { sttConfidence, latencyMs, usage }
+  createdAt DateTime    @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId])
+}
+
+// ============================================================
+// قياس الاستهلاك والفواتير + سجل المراجعة
+// ============================================================
+
+// كاش صوت TTS الذكي — الجمل المتكررة تُخزَّن بدل إعادة توليد Azure
+model TtsCache {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  textHash   String // sha256(voiceId + "|" + text)
+  text       String
+  voiceId    String
+  audioUrl   String // رابط تشغيل
+  audioPath  String // مسار الملف على القرص/الـ Object Storage
+  hits       Int      @default(0)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@unique([tenantId, textHash, voiceId])
+  @@index([tenantId])
+}
+
+// عدّاد استخدام شهري لكل مستأجر — الأساس في Global Metrics وفرض الـ Tier Limits
+model UsageLedger {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  month    String // "2026-08" — مفتاح الشهر
+
+  voiceMinutes      Float @default(0)
+  whatsappMsgs      Int   @default(0)
+  ttsCachedChars    Int   @default(0)
+  ttsGeneratedChars Int   @default(0)
+  apiCostUsd        Float @default(0)
+  llmTokensIn       Int   @default(0)
+  llmTokensOut      Int   @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, month])
+  @@index([tenantId])
+}
+
+// سجل تدقيق مركزي (لـ Super Admin وللامتثال)
+model AuditLog {
+  id        String      @id @default(cuid())
+  tenantId  String?
+  tenant    Tenant?     @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actorId   String?
+  action    AuditAction
+  resource  String // "agent:abc123"
+  metadata  Json?
+  createdAt DateTime    @default(now())
+
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+model Customer {
+  id            String            @id @default(cuid())
+  tenantId      String
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerCode  Int               @unique @default(autoincrement())
+  name          String
+  phone         String?
+  email         String?
+  customData    Json?
+  status        CustomerBotStatus @default(PENDING)
+  outcomeId     String?
+  outcome       TenantOutcome?    @relation(fields: [outcomeId], references: [id], onDelete: SetNull)
+  uploadBatchId String?
+  uploadBatch   UploadBatch?      @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  campaignTargets CampaignTarget[]
+  conversations   Conversation[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
+model TenantOutcome {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  label     String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  customers Customer[]
+
+  @@index([tenantId])
+}
+
+model UploadBatch {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileName  String
+  rowCount  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  customers Customer[]
+
+  @@index([tenantId])
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  type        CampaignType   @default(VOICE)
+  message     String?
+  status      CampaignStatus @default(DRAFT)
+  totalCount  Int            @default(0)
+  sentCount   Int            @default(0)
+  failedCount Int            @default(0)
+  createdAt   DateTime       @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  targets CampaignTarget[]
+
+  @@index([tenantId])
+}
+
+model CampaignTarget {
+  id         String    @id @default(cuid())
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status     String    @default("PENDING")
+  sentAt     DateTime?
+  meta       Json? // نتائج كل قناة: { voiceStatus, chatStatus, voiceCallId, chatError }
+  error      String? // رسالة الخطأ الإجمالية
+  createdAt  DateTime  @default(now())
+
+  @@unique([campaignId, customerId])
+  @@index([customerId])
+}

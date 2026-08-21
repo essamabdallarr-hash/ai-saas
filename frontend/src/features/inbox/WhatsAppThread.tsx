@@ -1,15 +1,17 @@
 import { CheckCheck, Clock, Send } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Badge, EmptyState } from '@/components/ui';
+import { useI18n } from '@/i18n';
 import type { WhatsappConnectionStatus, WhatsappMessage } from '@/lib/types';
 
 function StatusBadge({ status }: { status: WhatsappConnectionStatus }) {
+  const { t } = useI18n();
   const map = {
-    CONNECTED: { tone: 'green' as const, label: 'متصل' },
-    QR_PENDING: { tone: 'amber' as const, label: 'بانتظار مسح QR' },
-    DISCONNECTED: { tone: 'gray' as const, label: 'غير متصل' },
-    BROKEN: { tone: 'red' as const, label: 'انقطع الاتصال' },
-    BANNED: { tone: 'red' as const, label: 'محظور' },
+    CONNECTED: { tone: 'green' as const, label: t.inbox.connected },
+    QR_PENDING: { tone: 'amber' as const, label: t.inbox.qrPending },
+    DISCONNECTED: { tone: 'gray' as const, label: t.inbox.disconnected },
+    BROKEN: { tone: 'red' as const, label: t.inbox.connectionBroken },
+    BANNED: { tone: 'red' as const, label: t.inbox.banned },
   };
   const s = map[status];
   return <Badge tone={s.tone}>{s.label}</Badge>;
@@ -26,6 +28,7 @@ export function WhatsAppThread({
   typing?: boolean;
   onSend: (text: string) => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -43,14 +46,14 @@ export function WhatsAppThread({
 
   return (
     <div className="flex h-full min-h-[420px] flex-col">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-2">
         <StatusBadge status={connectionStatus} />
-        <span className="text-[11px] text-slate-400">المحرك الحر: ردود فقط + تأخير كتابة 3–5 ثوانٍ (Anti-Ban)</span>
+        <span className="text-[11px] text-[#98A2B3]">{t.inbox.antiBanInfo}</span>
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-4 scrollbar-thin">
         {messages.length === 0 && (
-          <EmptyState text="لا توجد رسائل بعد في هذه المحادثة" />
+          <EmptyState text={t.inbox.noMessagesYet} />
         )}
         {messages.map((m) => {
           const inbound = m.direction === 'INBOUND';
@@ -58,7 +61,7 @@ export function WhatsAppThread({
             <div key={m.id} className={`flex ${inbound ? 'justify-start' : 'justify-end'}`}>
               <div
                 className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
-                  inbound ? 'rounded-tr-sm bg-slate-100 text-slate-800' : 'rounded-tl-sm bg-ok-500 text-white'
+                  inbound ? 'rounded-tr-sm bg-[#FAFAFA] text-[#111111]' : 'rounded-tl-sm bg-ok-500 text-white'
                 }`}
               >
                 {m.body}
@@ -73,20 +76,20 @@ export function WhatsAppThread({
         })}
         {typing && (
           <div className="flex justify-start">
-            <div className="flex gap-1 rounded-full bg-slate-100 px-3 py-2">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+            <div className="flex gap-1 rounded-full bg-[#FAFAFA] px-3 py-2">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#98A2B3]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#98A2B3] [animation-delay:150ms]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#98A2B3] [animation-delay:300ms]" />
             </div>
           </div>
         )}
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} className="flex items-center gap-2 border-t border-slate-100 p-3">
+      <form onSubmit={submit} className="flex items-center gap-2 border-t border-[#E5E7EB] p-3">
         <input
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-ok-500 focus:outline-none"
-          placeholder="اكتب ردًا على العميل..."
+          className="flex-1 rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm focus:border-ok-500 focus:outline-none"
+          placeholder={t.inbox.replyPlaceholder}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />

@@ -2,13 +2,14 @@
   "name": "universal-ai-agent-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Universal AI Agent SaaS — Node.js Backend (Multi-Tenant Omnichannel)",
+  "description": "Apollo io — Node.js Backend (Multi-Tenant Omnichannel)",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
@@ -43,9 +44,11 @@
     "@types/pdf-parse": "^1.1.4",
     "@types/qrcode": "^1.5.5",
     "@types/ws": "^8.5.12",
+    "@vitest/coverage-v8": "^4.1.11",
     "prisma": "^6.1.0",
     "tsx": "^4.16.2",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "vitest": "^4.1.11"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -6,7 +6,7 @@ import { requireAuth, requireTenant, requireSuperAdmin } from '../lib/auth';
 import { asyncHandler } from '../lib/errors';
 import { config } from '../config';
 import { devLogin, login, me } from '../controllers/authController';
-import { getCurrentAgent, updateAgent, listDynamicFields, listDocuments } from '../controllers/agentController';
+import { getCurrentAgent, listDynamicFields, listDocuments } from '../controllers/agentController';
 import { startCall, getCall, listCalls } from '../controllers/callController';
 import {
   listConversations,
@@ -26,10 +26,23 @@ import {
   updateConnection,
   metaWebhook,
   metaWebhookVerify,
-  createCampaign,
+  createCampaign as createWACampaign,
   startCampaign,
-  listCampaigns,
+  listCampaigns as listWACampaigns,
 } from '../controllers/whatsappController';
+import {
+  listCustomers,
+  getCustomer,
+  getCustomerConversations,
+  uploadCustomers,
+  deleteCustomers,
+  updateCustomerOutcome,
+  listOutcomes,
+  dashboardStats,
+  createCampaign,
+  listCampaigns,
+  listUploadBatches,
+} from '../controllers/customerController';
 import {
   listTenants,
   createTenant,
@@ -38,6 +51,7 @@ import {
   listTenantUsers,
   setTenantUserPassword,
   getTenantAgent,
+  updateTenantAgent,
   replaceTenantFields,
   uploadTenantDocument,
   deleteTenantDocument,
@@ -45,6 +59,10 @@ import {
   setTenantAiKeys,
   getTenantAiKeys,
   globalMetrics,
+  listTenantOutcomes,
+  createTenantOutcome,
+  updateTenantOutcome,
+  deleteTenantOutcome,
 } from '../controllers/adminController';
 
 export const router = Router();
@@ -63,6 +81,7 @@ router.get('/admin/tenants', requireSuperAdmin, asyncHandler(listTenants));
 router.post('/admin/tenants', requireSuperAdmin, asyncHandler(createTenant));
 router.patch('/admin/tenants/:id', requireSuperAdmin, asyncHandler(updateTenant));
 router.get('/admin/tenants/:tenantId/agent', requireSuperAdmin, asyncHandler(getTenantAgent));
+router.put('/admin/tenants/:tenantId/agents/:agentId', requireSuperAdmin, asyncHandler(updateTenantAgent));
 router.put('/admin/tenants/:tenantId/fields', requireSuperAdmin, asyncHandler(replaceTenantFields));
 router.post('/admin/tenants/:tenantId/users', requireSuperAdmin, asyncHandler(createTenantUser));
 router.get('/admin/tenants/:tenantId/users', requireSuperAdmin, asyncHandler(listTenantUsers));
@@ -72,14 +91,42 @@ router.put('/admin/tenants/:tenantId/ai-keys', requireSuperAdmin, asyncHandler(s
 router.get('/admin/tenants/:tenantId/ai-keys', requireSuperAdmin, asyncHandler(getTenantAiKeys));
 router.post('/admin/tenants/:tenantId/documents', requireSuperAdmin, upload.single('file'), asyncHandler(uploadTenantDocument));
 router.delete('/admin/tenants/:tenantId/documents/:docId', requireSuperAdmin, asyncHandler(deleteTenantDocument));
+router.get('/admin/tenants/:tenantId/outcomes', requireSuperAdmin, asyncHandler(listTenantOutcomes));
+router.post('/admin/tenants/:tenantId/outcomes', requireSuperAdmin, asyncHandler(createTenantOutcome));
+router.patch('/admin/tenants/:tenantId/outcomes/:outcomeId', requireSuperAdmin, asyncHandler(updateTenantOutcome));
+router.delete('/admin/tenants/:tenantId/outcomes/:outcomeId', requireSuperAdmin, asyncHandler(deleteTenantOutcome));
 router.get('/admin/metrics', requireSuperAdmin, asyncHandler(globalMetrics));
+
+// ——— Meta Webhook (لا يتطلب Auth — يتحقق عبر token نفسه) ———
+router.get('/whatsapp/webhook', metaWebhookVerify);
+router.post('/whatsapp/webhook', asyncHandler(metaWebhook));
 
 // ——— Tenant scope ———
 router.use(requireTenant);
 
+// Dashboard
+router.get('/dashboard', asyncHandler(dashboardStats));
+
+// Customers
+router.get('/customers', asyncHandler(listCustomers));
+router.get('/customers/:id', asyncHandler(getCustomer));
+router.get('/customers/:id/conversations', asyncHandler(getCustomerConversations));
+router.post('/customers/upload', upload.single('file'), asyncHandler(uploadCustomers));
+router.delete('/customers', asyncHandler(deleteCustomers));
+router.patch('/customers/:id/outcome', asyncHandler(updateCustomerOutcome));
+
+// Outcomes — القراءة فقط للمستأجر (إنشاء/تعديل/حذف عبر Admin فقط)
+router.get('/outcomes', asyncHandler(listOutcomes));
+
+// Campaigns
+router.get('/campaigns', asyncHandler(listCampaigns));
+router.post('/campaigns', asyncHandler(createCampaign));
+
+// Upload Batches
+router.get('/upload-batches', asyncHandler(listUploadBatches));
+
 // Agent Builder
 router.get('/agents/current', asyncHandler(getCurrentAgent));
-router.put('/agents/:id', asyncHandler(updateAgent));
 router.get('/dynamic-fields', asyncHandler(listDynamicFields));
 router.get('/documents', asyncHandler(listDocuments));
 
@@ -112,10 +159,6 @@ router.post('/whatsapp/connections/:id/disconnect', asyncHandler(disconnectConne
 router.put('/whatsapp/connections/:id', asyncHandler(updateConnection));
 
 // WhatsApp — حملات القوالب الرسمية
-router.post('/whatsapp/campaigns', asyncHandler(createCampaign));
-router.get('/whatsapp/campaigns', asyncHandler(listCampaigns));
+router.post('/whatsapp/campaigns', asyncHandler(createWACampaign));
+router.get('/whatsapp/campaigns', asyncHandler(listWACampaigns));
 router.post('/whatsapp/campaigns/:id/start', asyncHandler(startCampaign));
-
-// ——— Meta Webhook (لا يتطلب Auth — يتحقق عبر token نفسه) ———
-router.get('/whatsapp/webhook', metaWebhookVerify);
-router.post('/whatsapp/webhook', asyncHandler(metaWebhook));

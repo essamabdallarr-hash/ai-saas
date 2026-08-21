@@ -59,18 +59,25 @@ export class MetaOfficialService {
       throw new ApiError(400, 'الاتصال الرسمي غير مكتمل الإعداد', 'META_NOT_CONFIGURED');
     }
     const token = decryptSecret(connection.metaAccessTokenEnc);
-    const res = await axios.post(
-      `${this.base(connection.metaPhoneNumberId)}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to,
-        type: 'text',
-        text: { body: text },
-      },
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    return res.data?.messages?.[0]?.id ?? String(Date.now());
+    try {
+      const res = await axios.post(
+        `${this.base(connection.metaPhoneNumberId)}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to,
+          type: 'text',
+          text: { body: text },
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      return res.data?.messages?.[0]?.id ?? String(Date.now());
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('auth')) throw new ApiError(503, 'مفتاح Meta غير صالح', 'META_AUTH_FAILED');
+      if (msg.includes('429') || msg.includes('rate')) throw new ApiError(429, 'تم تجاوز حد استدعاءات Meta', 'META_RATE_LIMITED');
+      throw new ApiError(502, 'فشل إرسال رسالة واتساب عبر Meta', 'META_SEND_FAILED');
+    }
   }
 
   /**

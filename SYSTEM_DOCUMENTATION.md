@@ -1,5 +1,5 @@
 # SYSTEM_DOCUMENTATION.md
-## Universal AI Agent SaaS — Developer Handover Guide
+## Apollo io — Developer Handover Guide
 
 الوثيقة المرجعية الشاملة لتسليم المشروع: المعمارية، الوحدات، قاعدة البيانات، والتشغيل في الإنتاج.
 تمت كتابتها بصيغة **Developer Handover** بحيث يستطيع أي مهندس استلام الكود وفهمه وتشغيله دون تدخل.
@@ -14,17 +14,22 @@
 - **قناة الواتساب**: محرّكان — **الحرّ (FREE_QR)** عبر `whatsapp-web.js`، و**الرسمي (OFFICIAL_META)** عبر Meta WhatsApp Cloud API.
 - **ذكاء المحادثة**: LLM (OpenAI gpt-4o-mini) مع **RAG/pgvector** و **استخراج بيانات ديناميكي (Dynamic Extraction)** وتلخيص تلقائي.
 - **لوحة Live Inbox**: بثّ مباشر عبر WebSocket للتنصّت والرد و **Human Takeover** ثم إنهاء المحادثة.
+- **حملات الواتساب**: حملات جماعية (Broadcast) مع **عميل مستمر (Resumable Worker)** يمنع التكرار ويعالج الأخطاء لكل هدف بشكل منفصل.
 
 ### البوابتان (Two Portals)
 
 | | بوابة العميل (Client — TenantScope) | بوابة مالك المنصة (Super Admin) |
 |---|---|---|
-| واجهة | `TenantShell` + `ClientDashboard` / `AgentBuilder` / `WhatsAppSetup` / `LiveInbox` / `DynamicReports` | `SuperAdminShell` + `TenantManager` / `AIStudio` |
+| واجهة | `TenantShell` + `ClientDashboard` / `AgentBuilder` / `WhatsAppSetup` / `LiveInbox` / `DynamicReports` | `SuperAdminShell` + `TenantManager` / `AdminAgentBuilder` / `AIStudio` |
 | الصلاحية | مقيّدة بعميل واحد (`requireTenant`) | عبر كل العملاء (`requireSuperAdmin`) |
-| ما يُدار | وكيله، محادثاته، واتسابه، تقاريره، استخراج الحقول | العملاء، مستخدمي العملاء وكلمات مرورهم، مفاتيح OpenAI لكل عميل، قوالب الوكيل والـ RAG، الإحصائيات العالمية |
+| ما يُدار | وكيله (اسم/حالة/صوت/سلوكيات)، نتائجه (قراءة فقط عبر `OutcomesManager`، الإنشاء/التعديل/الحذف Super Admin فقط)، محادثاته، واتسابه، تقاريره، استخراج الحقول | العملاء، مستخدمي العملاء وكلمات مرورهم، مفاتيح OpenAI لكل عميل، قوالب الوكيل والـ RAG، النتائج (Full CRUD لكل مستأجر)، الإحصائيات العالمية، Agent Builder لكل عميل |
 | الخصوصية | يقرأ ويعدّل بيانات عميله فقط | `openaiApiKeyEnc`/`metaAccessTokenEnc` تُستبدل في أي استجابة بـ `openaiKeyConfigured`/`metaConfigured` (لا يُرسَل أي سر أبدًا) |
 
 > **القاعدة الأساسية**: كل استجابة API تُخفي الأسرار المشفرة؛ `systemPrompt` للعميل يُدار حصريًا من `AIStudio` (Super Admin) ويُقصى من أي تعديل من بوابة العميل (يظهر كقيمة فارغة).
+
+### التنقل (Navigation)
+- **TenantShell**: 3 عناصر فقط — Dashboard / العملاء (Customers) / التقارير (Reports). صفحة WhatsAppSetup مخفية عن الـ Navigation ولكنها موصولة via Dashboard QR Card (نافذة منبثقة) أو via URL المباشر `/workspace/whatsapp`.
+- **SuperAdminShell**: 4 عناصر — Dashboard / العملاء (Tenants) / Agent Builder / WhatsApp. صفحة AIStudio غير مرتبطة بعنصر نقل مباشر (تُفتح من TenantManager عبر `tenants/:tenantId/studio`).
 
 ---
 
@@ -38,7 +43,7 @@
 
 ### الواجهة الخلفية (Backend) — `backend/`
 - **Node.js + Express 4 + TypeScript 5.5** (`tsx` للتطوير، `tsc` للإنتاج).
-- **Prisma 6 + PostgreSQL + pgvector** (تضمين المتجهات `vector(1536)`).
+- **Prisma 6 + PostgreSQL + pgvector** (تضمين المتجهات `vector(1536)`) + **PostgreSQL Sequences** (لتوليد `customerCode` التسلسلي الفريد).
 - **gRPC**: `@grpc/grpc-js` للتواصل مع محرك **rapidaai/voice-ai** (بث ثنائي الاتجاه).
 - **WebSocket**: `ws` لـ Live Inbox.
 - **whatsapp-web.js** (Puppeteer/Chromium) للمحرك الحر، **Meta Graph API** عبر axios للمحرك الرسمي.
@@ -49,12 +54,13 @@
 backend/
   package.json          # scripts: dev / build / start / typecheck / prisma:*
   prisma/schema.prisma  # مصدر الحقيقة لقاعدة البيانات
+  prisma/migrations/    # تهجيرات SQL (تتضمن Sequence لـ customerCode)
   src/
-    index.ts            # إقلاع Express + HTTP + WebSocket + seed تطويري
+    index.ts            # إقلاع Express + HTTP + WebSocket + seed تطويري + startCampaignWorker()
     config.ts           # كل إعدادات البيئة (dotenv)
     routes/index.ts     # خريطة API كاملة
     controllers/        # طبقة HTTP (auth, agent, call, conversation, whatsapp, report, tts, admin)
-    services/           # طبقة الأعمال (ai, rag, rapida, whatsapp, takeover)
+    services/           # طبقة الأعمال (ai, rag, rapida, whatsapp, takeover, campaign)
     lib/                # auth, crypto, openai, prisma, password, errors
     ws/hub.ts           # ناقل WebSocket المعزول بالمستأجر
 frontend/
@@ -75,19 +81,28 @@ frontend/
 - `AuditLog` و `UsageLedger` مرتبطان أيضًا بالعميل لتدقيق إداري وفوترة.
 - قابلية توسيع مستقبلية بـ PostgreSQL RLS (مذكورة في schema) — العزل الحالي تطبيقي (Application-Level) عبر `requireTenant` على المسارات والاستعلامات.
 
-### 3.2 استخراج البيانات الديناميكي (Dynamic Extraction)
+### 3.2 الكود الفريد للعميل (Customer Code — `customerCode`)
+- **معرف فريد عالمي تسلسلي** يبدأ من **90001**، مُعرَّف عبر **PostgreSQL Sequence** في تهجيرة (`CREATE SEQUENCE "Customer_customerCode_seq" START WITH 90001`).
+- يُستخدم كـ **معرف عالمي (Universal Identifier)** لـ Customer عبر جميع المستأجرين — أي عميل يحمل كودًا فريدًا لا يتكرر مهما تغيّر المستأجر.
+- `customerCode Int @unique @default(autoincrement())` في Prisma schema — Prisma يعرف أن PostgreSQL يولّد القيمة تلقائيًا عبر Sequence.
+- عند إنشاء عميل جديد (`createCustomer`) — لا يُرسَل `customerCode` من التطبيق؛ PostgreSQL يستخدم `DEFAULT nextval('"Customer_customerCode_seq"')` تلقائيًا.
+- يُعرض في واجهة **Customer Detail** على الواجهة الأمامية كقيمة للقراءة فقط.
+- **Backfill**: التهجيرة تُعيّن `setval` لإعادة توليد الـ Sequence من أعلى `customerCode` موجود لتجنّب التعارض عند تطبيقه على قاعدة تحتوي بيانات.
+- **لا إعادة استخدام الأكواد**: الـ Sequence لا تتراجع عند حذف عميل.
+
+### 3.3 استخراج البيانات الديناميكي (Dynamic Extraction)
 - `DynamicField` (الحقول المراد استخراجها: الاسم، النوع، الوصف، إلزامي/اختياري) → `ExtractedValue` (القيمة + الثقة + الاقتباس الأصلي).
 - **الحقل ⟵ الوكيل ⟵ محادثة**: `@@unique([tenantId, key])` و `@@unique([conversationId, fieldId])`.
 - عند إغلاق المحادثة (`closeConversation`) يُنفَّذ `aiService.extractFields()` الذي يطلب من LLM **JSON صارمًا** من قيم الحقول، ويخزّن القيم ويبثّ `extraction.updated`.
 - التقارير تُبنى من هذه القيم: `DynamicReports` / `reportController.reports` يدمج صفوف المكالمات (Call) مع محادثات الواتساب (WhatsApp conversation rows).
 
-### 3.3 RAG / pgvector
+### 3.4 RAG / pgvector
 - `KnowledgeDocument` (pdf / xlsx / txt) ⟵ `KnowledgeChunk` مع عمود **`embedding vector(1536)`** (OpenAI `text-embedding-3-small`).
 - **Ingestion** (`RagService.ingestDocument`): استخراج نصي → تقسيم إلى أجزاء (700 حرف / 100 حرف تداخل) → تضمين دفعات (20/دفعة) → إدراج عبر `$executeRawUnsafe` (لأن Prisma لا يكتب `vector` مباشرة).
 - **Retrieval** (`ragService.search`): تضمين الاستعلام ثم `ORDER BY c."embedding" <-> $3::vector LIMIT 4` مع فلترة المستأجر (والوكيل إن وُجد). **إذا لم تكن pgvector متاحة، يعمل النظام بلا RAG دون انهيار** (catch يعيد قائمة فارغة).
 - **ملاحظة الأمان**: رفع/حذف المستندات حصري عبر مسارات Super Admin (`/admin/tenants/:tenantId/documents`) — لا وجود لأوامر رفع من بوابة العميل (تُدرج من بوابة AI Studio).
 
-### 3.4 التشفير عند التخزين (Encryption at Rest)
+### 3.5 التشفير عند التخزين (Encryption at Rest)
 - `lib/crypto.ts`: **AES-256-GCM**، مفتاح مشتق بـ SHA-256 من `SECRET_KEY` (env، مع fallback لـ `JWT_SECRET` — يُنصح بتثبيت قيمة مستقلة حتى يمكن تدوير JWT دون كسر الأسرار).
 - تنسيق الحمولة: `iv:tag:ciphertext` (Base64).
 - الأسرار المشفرة: `Tenant.openaiApiKeyEnc`، `Tenant.openaiModel` (نموذج LLM للعميل)، `WhatsappConnection.metaAccessTokenEnc`.
@@ -125,15 +140,65 @@ frontend/
 - **Webhook**: `GET /whatsapp/webhook` تحقّق (verify token) + `POST /whatsapp/webhook` استقبال الرسائل (رُبطت برقم الهاتف `metaPhoneNumberId`).
 - **إرسال نص** عبر `graph.facebook.com/{version}/{phoneNumberId}/messages` بـ Bearer token مفكوك من `metaAccessTokenEnc`.
 - **حملات القوالب (Template Broadcasts)**: مسموحة **فقط** للمحرك الرسمي؛ تُرسل مع متغيّرات (components) وتهدئة 500ms بين الرسائل، ويُحدَّث حالة الحملة (`sent===0 → FAILED` وإلا `COMPLETED`).
+- **Meta 24h Window** (نافذة 24 ساعة): قبل إرسال رسالة outbound عبر Meta API، يتحقّق النظام من وجود **رسالة inbound واردة من العميل خلال آخر 24 ساعة** على **نفس `connectionId`** الخاص باتصال `OFFICIAL_META` المستخدم في الإرسال. شروط النافذة:
+  1. `tenantId` مطابق.
+  2. `connectionId` مطابق (نفس اتصال OFFICIAL_META).
+  3. `contactNumber` مطابق لرقم العميل.
+  4. `direction = INBOUND`.
+  5. `createdAt` خلال آخر 24 ساعة.
+  - إذا لم تُوجد رسالة مُؤهّلة: تُ FAILED فورًا دون إرسال (سياسة Meta الإلزامية).
+  - **لا تُستخدم رسالة FREE_QR أو رسالة من اتصال OFFICIAL_META مختلف**.
 
-### 4.2 توجيه رسائل الـ LLM (LLM Routing) — `AiProcessorService`
+#### (ج) منطق حالة الواتساب (WhatsApp Status Logic)
+- **رسائل الوكيل الصادرة (Outbound)**: **لا** تُغيّر `Customer.status` إلى `DONE` — المحادثة تبقى مفتوحة ما لم يُنهِها العميل.
+- **رسائل العميل الواردة (Inbound)** فقط تُحدّث `Customer.status` إلى `DONE` (إشارة إلى أن العميل تلقّى الرد واكتفى).
+- **القناة الصوتية (Voice Channel)**:
+  - `DONE` فقط إذا `Call.status === COMPLETED` (مكالمة ناجحة ومُغلقة بشكل طبيعي).
+  - `FAILED` → **لا يتغيّر** `Customer.status` — فشل عام لا يعني عدم الرد.
+  - **لا يوجد مسار حاليًا يُعيّن `DID_NOT_ANSWER`** — Proto الحالية لا تحتوي على حدث صريح يعني "العميل لم يرد". الحالة تبقى كما هي.
+- **_OUTCOMES (النتائج)**: مسارات `POST /outcomes` و `DELETE /outcomes/:id` مفتوحة لمستأجر (`requireTenant`) — كل عميل يدير نتائجه الخاصة.`OutcomesManager.tsx` يتيح إنشاء/حذف Outcome من بوابة العميل مباشرة.
+
+#### (د) عامل الحملات المستمر (Resumable Campaign Worker)
+- **`startCampaignWorker()`** يُستدعى عند إقلاع الخادم (`server.listen()`) ويعمل كـ **Process مستمر** في الخلفية.
+- **Polling**: يتحقق كل **ثانيتين (2s)** من الحملات بحالة `RUNNING` في قاعدة البيانات.
+- **Claim ذرّي (Atomic Claim)**: يستخدم `prisma.$transaction` مع `SELECT ... FOR UPDATE SKIP LOCKED` — يمنع عاملين من أخذ نفس الهدف في نفس الوقت.
+- **بيانات المعالجة**: كل Target يحمل `processingStartedAt` (وقت بدء المعالجة)، `workerId` (معرّف Worker)، `attempts` (عدد المحاولات).
+- **استرداد العالق (Stale Recovery)**: أي Target في `PROCESSING` تجاوز **5 دقائق** يُعاد إلى `PENDING` (إذا `attempts < 3`) أو يُحوّل إلى `FAILED` (إذا تجاوز 3 محاولات).
+- **منع التداخل (Overlap Guard)**: علامة `workerRunning` تمنع بدء دورة جديدة إذا كانت السابقة ما زالت تعمل. الأخطاء لا توقف Worker.
+- **معالجة خطأ لكل هدف**: إذا فشل إرسال رسالة لهدف معين، يُحدَّث حالته إلى `FAILED` ويكمل الباقي دون توقّف.
+- **تحديث عدّادات الحملة**: بعد كل دفعة، يُحدَّث `sent`/`failed` من قاعدة البيانات (ليس من الذاكرة). Campaign لا تصبح `COMPLETED` إلا بعد خروج **جميع** الأهداف من `PENDING` و`PROCESSING`.
+
+### 4.2 دورة حياة المكالمة عبر Rapida Bidi Stream (Call Lifecycle)
+- **`AssistantTalk`** في `talk.proto`: `rpc AssistantTalk(stream AssistantTalkRequest) returns (stream AssistantTalkResponse)` — هذا **Bidi Streaming** (بث ثنائي الاتجاه).
+- **`CreatePhoneCall`**: `rpc CreatePhoneCall(CreatePhoneCallRequest) returns (CreatePhoneCallResponse)` — هذا **Unary** (طلب واحد واستجابة واحدة) — يُعيد `rapidaConversationId` فقط.
+- **`RapidaEventStreamService`** يفتح stream `AssistantTalk` بعد `CreatePhoneCall` ويستمع لأحداث **`AssistantTalkResponse`** عبر `stream.on('data', ...)`.
+- **تفكيك الاستجابة**: `AssistantTalkResponse` يحتوي على `code` + `success` + `data` (oneof يحتوي على `disconnection`، `error`، `event`، إلخ). الكود يستخرج `event.data.disconnection` للحصول على نوع الفصل.
+- يُحوّل **أنواع الفصل** إلى حالات مكالمة واضحة:
+
+  | نوع الفصل (Disconnection Type) | حالة المكالمة الناتجة | تأثير على Customer.status |
+  |---|---|---|
+  | `TOOL` (الوكيل أنهى المحادثة) | `COMPLETED` | `DONE` |
+  | `USER` (المستخدم أنهى المحادثة) | `COMPLETED` | `DONE` |
+  | `IDLE_TIMEOUT` (مهلة خمول) | `FAILED` | لا يتغيّر |
+  | `MAX_DURATION` (الحد الأقصى للمدة) | `FAILED` | لا يتغيّر |
+  | `ERROR` (خطأ تقني) | `FAILED` | لا يتغيّر |
+
+- عند تلقي حدث `ConversationDisconnection`:
+  1. يُغلق المحادثة تلقائيًا (`closeConversation`).
+  2. يُحدَّث `Call.status` حسب الجدول أعلاه.
+  3. يُحدَّث `Customer.status` — فقط `DONE` عند `COMPLETED`، لا يتغيّر عند `FAILED`.
+  4. يبثّ `call.status` عبر WebSocket لتحديث الواجهة لحظيًا.
+- **Human Takeover**: `disconnectConversation` يرسل `DISCONNECTION_TYPE_USER` عبر الـ stream النشط (إن وُجد) أو يفتح stream جديدًا.
+- **لا يوجد حاليًا حدث صريح من Rapida يعني "العميل لم يرد"** — `DID_NOT_ANSWER` غير مستخدمة.
+
+### 4.3 توجيه رسائل الـ LLM (LLM Routing) — `AiProcessorService`
 - **المفتاح والنموذج لكل مستأجر**: `openAIClientFor(tenantId)` في `lib/openai.ts` يفضّل مفتاح/نموذج العميل المشفّر في DB على إعدادات المنصة، مع كاش (cache) لكل مستأجر.
 - **بناء System Prompt** (`buildSystemPrompt`): نبرة العميل (`agent.systemPrompt` — من Super Admin) + الهدف + قائمة الحقول الديناميكية المطلوب استخراجها + المعرفة المرجعية RAG (تُحقن خارجيًا، "استخدمها حرفيًا ولا تخترع").
 - **generateReply**: آخر 12 رسالة كسياق، `max_tokens=500, temperature=0.7`، حفظ الرد كـ `ConversationMessage` وبثّه.
 - **summarizeConversation / extractFields**: عند الإغلاق — تلخيص 3–5 نقاط بالعربية وتخزينه في `Conversation.summary`، واستخراج JSON للحقول مع `response_format: json_object` وتخزين `ExtractedValue` وبثّ `extraction.updated`.
 - **الإرسال البشري (Human Takeover)**: `takeoverService` يوقف AI؛ `sendHumanReply` يرسل مباشرة عبر المحرك (بدون LLM) ويُسجَّل الدور `HUMAN`؛ وفي المكالمات الصوتية يستدعي `RapidaProxyService.disconnectConversation(rapidaConversationId)` لقطع بث rapida.
 
-### 4.3 WebSocket في Live Inbox — `ws/hub.ts`
+### 4.4 WebSocket في Live Inbox — `ws/hub.ts`
 - نقطة اتصال واحدة: **`ws://<host>/ws/inbox?token=<JWT>`** — تُتحقق في مرحلة `upgrade` (401 بلا توكن، 403 بلا مستأجر).
 - **عزل تام بالمستأجر**: خريطة `Map<tenantId, Set<Socket>>`؛ أي `hub.broadcast(tenantId, event)` لا يصل إلا لعملاء نفس العميل.
 - **نبض الحياة**: ping/pong كل 30 ثانية لفصل الاتصالات الميتة.
@@ -143,17 +208,42 @@ frontend/
   - `message.send` → إرسال رد بشري عبر المحرك المناسب.
 - **الرابطة الأمامية**: `LiveInbox` / `OmnichannelLiveInbox` تستمع لهذه الأحداث وتعرض المحادثات والترانزكريبت والملخصات واستخراج الحقول لحظيًا، مع زر Human Takeover وزر "إنهاء المحادثة" (`POST /conversations/:id/close`).
 
-### 4.4 خريطة API (الملخص)
+### 4.5 خريطة API (الملخص)
 ```
 Auth:            POST /auth/dev-login | /auth/login | GET /auth/me
 Super Admin:     CRUD tenants | users (list/create/reset-password) | ai-keys (GET/PUT)
                  agent + fields | prompt | documents (upload/delete) | /admin/metrics
-Tenant scope:    /agents/current (GET/PUT) | /dynamic-fields | /documents (GET)
+                 agents/:agentId (GET/PUT full update — AdminAgentBuilder)
+                 outcomes (GET/POST/PATCH/DELETE per tenant)
+Tenant scope:    /agents/current (GET) | /dynamic-fields | /documents (GET)
+                 /outcomes (GET only — read-only)
+                 /customers (GET [page,pageSize,search,status,outcomeId,dateFrom,dateTo] | DELETE [ids|allMatching] | upload | outcome)
                  /calls | /conversations (+ /:id/messages|extractions|close|takeover)
+                 /campaigns (POST with allMatching + filters including dateFrom/dateTo)
+                 /upload-batches
                  /tts/preview | /tts/cache-stats | /tenants/me/usage | /reports
 WhatsApp:        /whatsapp/connections (CRUD + status + disconnect) | /whatsapp/campaigns
+                 POST /whatsapp/connections — supports Auto-Create FREE_QR from Dashboard
                  GET/POST /whatsapp/webhook (Meta)
 ```
+
+### 4.6 Frontend → Backend API Mapping (كامل)
+| الصفحة | الملف | Endpoint(s) |
+|---|---|---|
+| **LoginScreen** | `auth/LoginScreen.tsx` | `POST /auth/login`, `GET /auth/me`, `POST /auth/dev-login` |
+| **ClientDashboard** | `client/ClientDashboard.tsx` | `GET /dashboard`, `POST /calls`, `GET /whatsapp/connections`, `GET /whatsapp/connections/:id/status` |
+| **AgentBuilder** (Admin) | `admin/AdminAgentBuilder.tsx` → `agent/AgentBuilder.tsx` | `GET /admin/tenants` (tenant selector), `GET /admin/tenants/:id/agent`, `PUT /admin/tenants/:id/agents/:agentId` |
+| **AgentBuilder** (Tenant) | `agent/AgentBuilder.tsx` | `GET /agents/current`, `PUT /agents/:id` |
+| **VoicePicker** | `agent/VoicePicker.tsx` | `POST /tts/preview` |
+| **WhatsAppSetup** | `whatsapp/WhatsAppSetup.tsx` | `GET /whatsapp/connections`, `POST /whatsapp/connections`, `GET /whatsapp/connections/:id/status`, `POST /whatsapp/connections/:id/disconnect`, `PUT /whatsapp/connections/:id` |
+| **CustomersPage** | `customers/CustomersPage.tsx` | `GET /customers`, `GET /outcomes`, `POST /customers/upload`, `DELETE /customers`, `POST /campaigns` |
+| **CustomerDetailPage** | `customers/CustomerDetailPage.tsx` | `GET /customers/:id`, `GET /customers/:id/conversations` |
+| **OutcomesManager** | `customers/OutcomesManager.tsx` | `GET /outcomes`, `POST /outcomes`, `DELETE /outcomes/:id` |
+| **DynamicReports** | `reports/DynamicReports.tsx` | `GET /dynamic-fields`, `GET /reports` |
+| **OmnichannelLiveInbox** | `inbox/OmnichannelLiveInbox.tsx` | `GET /conversations`, `GET /whatsapp/connections`, `POST /conversations/:id/close` |
+| **TenantManager** (Admin) | `admin/TenantManager.tsx` | `GET /admin/tenants`, `POST /admin/tenants`, `PATCH /admin/tenants/:id`, `POST /admin/tenants/:id/users`, `GET /admin/tenants/:id/users`, `PUT /admin/tenants/:id/users/:userId/password` |
+| **AIStudio** (Admin) | `admin/AIStudio.tsx` | `GET /admin/tenants/:id/agent`, `PUT /admin/tenants/:id/agents/:agentId/prompt`, `PUT /admin/tenants/:id/fields`, `POST /admin/tenants/:id/documents`, `DELETE /admin/tenants/:id/documents/:docId`, `GET/PUT /admin/tenants/:id/ai-keys` |
+| **AdminDashboard** | `admin/AdminDashboard.tsx` | `GET /admin/metrics` |
 
 ---
 
@@ -204,7 +294,7 @@ npm install
 ```
 
 ### 5.4 قاعدة البيانات — Migrate & Seed
-> **مهم**: المجلد `migrations` غير مضمّن حاليًا (لم تُنشأ تهجيرة بعد). أول مرة تُنشئها من بيئة تطويرية:
+> **مهم**: التهجيرات تُدار عبر `prisma/migrations/`. تضمن التهجيرة الجديدة حقول `customerCode` + Sequence.
 ```bash
 cd backend
 npx prisma migrate dev --name init    # ينشئ migrations/ ويطبّقها (يتطلب shadow DB للـ dev)
@@ -252,11 +342,180 @@ pm2 save && pm2 startup
 
 ### 5.8 التحقق قبل النشر (CI/Dev)
 ```bash
+cd backend && npx prisma format       # تنسيق Schema
+cd backend && npx prisma validate     # التحقق من Schema
+cd backend && npx prisma generate     # توليد Prisma Client
 cd backend  && npm run typecheck      # tsc --noEmit
-cd frontend && npm run typecheck
-cd frontend && npm run test           # vitest run (14+ اختبارًا)
-cd frontend && npm run build          # تثبت سلامة البناء النهائي
+cd backend && npm run test           # vitest run — 137 اختبار (48 Round 1-3 + 48 Round 4 + 41 Round 5)
+cd backend && npm run build          # tsc → dist/
+cd frontend && npm run typecheck      # tsc --noEmit
+cd frontend && npm run test           # vitest run (45 اختبار: AgentBuilder 2 + AIStudio 5 + OmnichannelLiveInbox 7 + CustomersPage 20 + ClientDashboard 11)
+cd frontend && npm run build          # tsc && vite build → dist/
 ```
+> ⚠️ لا يمكن اختبار Migration أو `customerCode` Runtime بدون PostgreSQL فعلية. لا يمكن اختبار تكاملات OpenAI/Rapida/Meta/Deepgram/Azure بدون المفاتيح والخدمات المطلوبة.
+
+#### اختبارات Backend (Backend Test Suite)
+تتبع **137 اختبارًا** باستخدام **vitest** (48 اختبار Round 1-3 + 48 اختبار Round 4 + 41 اختبار Round 5). **تصنيف الاختبارات الصادق:**
+
+| التصنيف | العدد | وصف |
+|---|---|---|
+| **Source Inspection** | 89 | يقرأ ملفات Source Code ويتحقق من وجود نصوص محددة (schema, migration, routes, controllers, frontend components) |
+| **Unit Test** | 48 | منطق في الذاكرة (buildCustomerWhere, ALLOWED_PAGE_SIZES, sanitizeTenant, sanitizeConnection) |
+| **Controller Test** | 0 | لا يوجد استدعاء فعلي لأي Controller |
+| **API Test** | 0 | لا يوجد HTTP request فعلي (لا supertest) |
+| **Database Integration** | 0 | Prisma محاكاة بالكامل — لا PostgreSQL حقيقي |
+
+> ⚠️ **تنبيه صادق**: **89 من أصل 137 اختبار (65%)** هي اختبارات Source Inspection تقرأ الكود المصدري وتحقق من وجود نصوص محددة. **48 اختبار (35%)** هي اختبارات وحدات (Unit) تتحقق من منطق في الذاكرة. لا يوجد اختبار واحد يتحقق من التشغيل الفعلي (Controller/API/Database). الاختبارات مفيدة لمنع الانحدار (Regression) لكنها لا تضمن أن النظام يعمل فعليًا.
+
+| الوحدة | عدد الاختبارات | التصنيف | ما يُختبَر |
+|---|---|---|---|
+| **Migration SQL** | 3 | Source Inspection | صحة SQL التهجيرة، وجود Sequence، وجود حقل `customerCode` |
+| **customerCode** | 4 | Source Inspection | تسلسل فريد، عدم التعارض عبر المستأجرين، backfill للبيانات الموجودة، صيغة الكود |
+| **WhatsApp Status Logic** | 4 | Unit Test | Outbound لا يُغيّر status، Inbound يُعيده إلى DONE، صوت COMPLETED → DONE، صوت FAILED لا يتغيّر |
+| **Meta 24h Window** | 10 | Unit Test | رسالة بدون inbound مرفوضة، رسالة مع inbound أقدم من 24 ساعة مرفوضة، رسالة مع inbound حديثة مقبولة، رسالة FREE_QR مرفوضة، رسالة من connection مختلفة مرفوضة، رسالة من tenant مختلف مرفوضة |
+| **Campaign Worker** | 7 | Unit Test | poll كل ثانيتين، claimPendingTargets ذري مع FOR UPDATE SKIP LOCKED، error per-target لا يوقف الحملة، عدّادات Campaign من قاعدة البيانات، stale recovery، max attempts 3، overlap guard |
+| **TenantOutcome Isolation** | 2 | Unit Test | عزل النتائج بين المستأجرين، عدم تسريب بيانات عبر المستأجرين |
+| **TenantOutcome Admin Permissions** | 13 | Source Inspection | Tenant قراءة فقط، لا POST/PATCH/DELETE في Tenant scope، Admin routes محمية بـ requireSuperAdmin، GET/POST/PATCH/DELETE موجودة، حذف آمن مع فحص الاستخدام، Schema safety |
+| **Call Lifecycle Mapping** | 7 | Unit Test | ERROR → FAILED لا يتغيّر Customer، TOOL → COMPLETED → DONE، USER → COMPLETED → DONE، IDLE_TIMEOUT لا يتغيّر، MAX_DURATION لا يتغيّر، FAILED لا يتغيّر، لا يوجد DID_NOT_ANSWER |
+| **Date Filter Logic — R4** | 6 | Unit Test | dateFrom لوحده، dateTo لوحده، الاثنين معًا، لا يوجد تاريخ، التاريخ مع باقي الفلاتر، التاريخ مع البحث |
+| **PageSize Validation — R4** | 6 | Unit Test | 10/50/100 مقبول، 20/0/999 مرفوض |
+| **Select All + Bulk Delete + Campaign — R4** | 7 | Source Inspection | allMatching يحترم التاريخ والفلاتر، لا يتجاوز tenantId، تغيير الفلتر يلغي التحديد |
+| **QR Auto-Create — R4** | 4 | Source Inspection | guard يمنع التكرار، فشل GET يعرض خطأ، إنشاء FREE_QR، وقف Polling |
+| **Excel Validation — R4** | 9 | Source Inspection | صيغ مقبولة/مرفوضة، صف بدون هاتف/فارغ، لا يُدخل customerCode، لا UploadBatch إذا فشل بالكامل |
+| **Customer Isolation — R4** | 3 | Source Inspection | getCustomer يستخدم id+tenantId، getCustomerConversations يستخدم customerId+tenantId، لا عبور بين Tenants |
+| **Secret Sanitization — R4** | 5 | Unit Test | sanitizeTenant يزيل الأسرار، sanitizeConnection يزيل metaAccessTokenEnc، Login/Me لا يُرجع أسرار |
+| **Agent Builder Permissions — R4** | 6 | Source Inspection | Tenant لا يرى AgentBuilder، لا يوجد /workspace/agent، admin routes محمية، tenant scope لا يُرجع systemPrompt |
+| **Dashboard Cost — R4** | 2 | Source Inspection | التكلفة من apiCostUsd فقط، لا mock data |
+| **PageSize Validation — R5** | 7 | Unit Test | listCustomers ترفض pageSize غير صالح، تقبل 10/50/100، لا تقبل NaN/decimal/سالب |
+| **Excel Validation — R5** | 10 | Source Inspection | رفض ملف بدون header اسم، رفض صف بدون اسم/هاتف، trim قبل الفحص، لا اسم افتراضي، لا UploadBatch فارغ، rejected info |
+| **FREE_QR Unique Constraint — R5** | 5 | Source Inspection | Schema @@unique، Migration CREATE UNIQUE INDEX، P2002 handling، لا stack trace، findFirst guard |
+| **Agent PUT Disabled — R5** | 4 | Source Inspection | PUT /agents/:id غير موجود في Tenant scope، GET /agents/current موجود، لا systemPrompt، Admin محمي |
+| **Customer Isolation — R5** | 5 | Source Inspection | getCustomer findFirst+id+tenantId، getCustomerConversations owner check، لا عبور بين Tenants |
+| **QR Auto-Create — R5** | 8 | Source Inspection | فشل GET لا يُنفذ POST، POST مرة واحدة فقط، FREE_QR guard، qrCreating guard، Polling stops، Error display |
+| **Migration Safety — R5** | 2 | Source Inspection | لا حذف بيانات، CREATE UNIQUE INDEX فقط |
+
+```bash
+cd backend && npm run test           # تشغيل جميع اختبارات backend (137 اختبار)
+```
+
+#### اختبارات Frontend (Frontend Test Suite)
+تتبع **45 اختبارًا** باستخدام **vitest + React Testing Library + jsdom**. **تصنيف الاختبارات الصادق:**
+
+| التصنيف | العدد | وصف |
+|---|---|---|
+| **Integration Test** | 45 | يُ/render مكون React وتفاعل مع DOM عبر userEvent (click, type, change) |
+| **Unit Test** | 0 | لا يوجد اختبار وحدات خالص في frontend |
+| **E2E Test** | 0 | لا يوجد اختبار نهاية-إلى-نهاية (Playwright/Cypress) |
+
+> ⚠️ **تنبيه صادق**: اختبارات Frontend هي اختبارات تكامل (Integration) تتحقق من سلوك المكونات في بيئة معزولة (jsdom). لا تختبر API calls حقيقية — كل `api` و `uploadFile` و WebSocket محاكاة بـ mocks. مفيدة لمنع انحدار الواجهة.
+
+| الوحدة | عدد الاختبارات | التصنيف | ما يُختبَر |
+|---|---|---|---|
+| **AgentBuilder** | 2 | Integration | تحميل الوكيل وحفظ الاسم عبر PUT |
+| **AIStudio** | 5 | Integration | System Prompt حفظ PUT + Dynamic Fields + OpenAI Key تشفير + tabs |
+| **OmnichannelLiveInbox** | 7 | Integration | WebSocket live messages + Human Takeover + Send Message |
+| **CustomersPage** | 20 | Integration | Checkboxes + Select All + PageSize (10/50/100) + Date Filter (dateFrom/dateTo) + Delete Popup (ids + allMatching) + Campaign Popup (VOICE + allMatching) + Upload Excel + pageSize visible with empty results |
+| **ClientDashboard** | 11 | Integration | QR Auto-Create + guard + GET failure + POST failure + QR Pending + QR Connected + Simulation modal + POST /calls + callers error |
+
+```bash
+cd frontend && npm run test           # تشغيل جميع اختبارات frontend (45 اختبار)
+```
+
+---
+
+### Frontend ↔ Backend Mapping
+
+| Frontend Route | Frontend Component | Backend API Endpoint | Auth |
+|---|---|---|---|
+| `/` | `LoginPage` | `POST /auth/login` | Public |
+| `/admin` | `AdminDashboard` | `GET /admin/metrics` | SuperAdmin |
+| `/admin/tenants` | `TenantManager` | `GET /admin/tenants` | SuperAdmin |
+| `/admin/tenants/:id/studio` | `AIStudio` | `GET/PUT /admin/tenants/:id/agent` | SuperAdmin |
+| `/admin/agent` | `AdminAgentBuilder` → `AgentBuilder` | `GET /admin/tenants/:id/agent` + `PUT /admin/tenants/:id/agents/:aid` | SuperAdmin |
+| `/admin/tenants/:id/outcomes` | `TenantManager` (expandable) → `OutcomesManager` | `GET/POST/PATCH/DELETE /admin/tenants/:id/outcomes` | SuperAdmin |
+| `/workspace/dashboard` | `ClientDashboard` | `GET /dashboard` + QR Auto-Create (`GET /whatsapp/connections` → `POST /whatsapp/connections` if none) | Tenant |
+| `/workspace/customers` | `CustomersPage` | `GET /customers` (page, pageSize[10/50/100], search, status, outcomeId, dateFrom, dateTo) + `GET /outcomes` (read-only) | Tenant |
+| `/workspace/customers/:id` | `CustomerDetailPage` | `GET /customers/:id` (id+tenantId) + `GET /customers/:id/conversations` (customerId+tenantId) | Tenant |
+| `/workspace/reports` | `DynamicReports` | `GET /reports` | Tenant |
+| `/workspace/inbox` | `OmnichannelLiveInbox` | WebSocket `/ws` | Tenant |
+| `/workspace/whatsapp` | `WhatsAppSetup` | `GET/POST/DELETE /whatsapp/connections` | Tenant |
+
+### وظائف Round 4 الجديدة في Mapping
+
+| الوظيفة | Frontend Component | API Route | Middleware | Controller | Prisma Query |
+|---|---|---|---|---|---|
+| **dateFrom/dateTo filter** | `CustomersPage.tsx` (input date × 2) | `GET /customers?dateFrom=...&dateTo=...` | `requireTenant` | `listCustomers` | `customer.findMany` WHERE `createdAt: { gte, lte }` |
+| **pageSize selector** | `CustomersPage.tsx` (select 10/50/100) | `GET /customers?pageSize=10` (default) | `requireTenant` | `listCustomers` (validates ALLOWED_PAGE_SIZES) | `customer.findMany` skip/take |
+| **Select All Matching** | `CustomersPage.tsx` (checkbox header) | `DELETE /customers` body `{ allMatching: true, filters: { ... } }` | `requireTenant` | `deleteCustomers` | `customer.findMany` WHERE (all filters) → `customer.deleteMany` |
+| **Bulk Delete** | `CustomersPage.tsx` (Delete button) | `DELETE /customers` body `{ ids: [...] }` or `{ allMatching, filters }` | `requireTenant` | `deleteCustomers` | `campaignTarget.deleteMany` + `customer.deleteMany` WHERE tenantId+id IN |
+| **Campaign allMatching** | `CustomersPage.tsx` (Megaphone button) | `POST /campaigns` body `{ allMatching, filters: { dateFrom, dateTo, ... } }` | `requireTenant` | `createCampaign` | `customer.findMany` WHERE (all filters) → `campaign.create` + `campaignTarget.createMany` |
+| **QR Auto-Create** | `ClientDashboard.tsx` (QR Modal) | `GET /whatsapp/connections` → `POST /whatsapp/connections` (FREE_QR) if none | `requireTenant` | `listConnections` + `createConnection` | `whatsappConnection.findFirst/create` |
+| **Excel Validation** | `CustomersPage.tsx` (Upload modal) | `POST /customers/upload` | `requireTenant` + `multer` | `uploadCustomers` | File type check → `customer.create` (phone required) |
+| **Customer Isolation** | `CustomerDetailPage.tsx` | `GET /customers/:id` + `GET /customers/:id/conversations` | `requireTenant` | `getCustomer` + `getCustomerConversations` | `customer.findFirst` WHERE `id + tenantId` |
+| **Secret Sanitization** | — (all responses) | All API routes | — | `authController.sanitizeTenant`, `whatsappController.sanitizeConnection` | — |
+| **Agent Builder Permission** | `AdminAgentBuilder.tsx` (admin only) | `GET /admin/tenants/:id/agent` + `PUT /admin/tenants/:id/agents/:aid` | `requireSuperAdmin` | `adminController.getTenantAgent/updateTenantAgent` | `agent.findFirst/update` WHERE tenantId+agentId |
+
+---
+
+## القيود الفعلية والمعروفة
+
+1. **لم يتم اختبار Meta WhatsApp Cloud API حقيقيًا** — الاختبارات تستخدم mocks.
+2. **لم يتم اختبار Rapida gRPC حقيقيًا** — الاتصال يعتمد على إعدادات البيئة.
+3. **لم يتم اختبار OpenAI LLM حقيقيًا** — الاستجابات محاكاة في الاختبارات.
+4. **لم يتم اختبار Migration على PostgreSQL حقيقي** — لا يوجد Docker أو PostgreSQL محلي.
+5. **`DID_NOT_ANSWER` غير مستخدمة حاليًا** — Proto الحالية لا تحتوي على حدث صريح يعني "العميل لم يرد".
+6. **`assistantConversationId` في `listenForCallEvents`** — يُرسل initialization للخادم لربط الـ stream بالمكالمة. إذا رفض الخادم الربط، لن تصل أحداث المكالمة (يحتاج اختبار على بيئة حقيقة).
+7. **`disconnectConversation`** — يرسل `DISCONNECTION_TYPE_USER` عبر الـ stream النشط أو يفتح stream جديدًا. لا يوجد ضمان من Proto أن الخادم يقبل stream جديدًا لنفس المحادثة.
+8. **QR Code في Dashboard** — بطاقة Dashboard تعرض نافذة منبثقة (Modal) تتحقق من حالة الاتصال. **Auto-Create**: إذا لم يوجد اتصال `FREE_QR`، يُنشئ واحدًا تلقائيًا (`POST /whatsapp/connections`) ثم يعرض QR مع polling كل 3 ثوانٍ. **Guard**: يمنع الإنشاء المتكرر (React Strict Mode / فتح متعدد). **Error Handling**: فشل GET لا يُعامل كعدم وجود اتصال — يعرض رسالة خطأ حقيقية. WhatsAppSetup لا يظهر في Navigation.
+9. **AgentBuilder في بوابة Super Admin** — يستخدم `AdminAgentBuilder` الذي يضيف قائمة منسدلة لاختيار المستأجر، ثم يستدعي `AgentBuilder` بـ `adminTenantId` ليستخدم مسارات `/admin/tenants/:id/agents/:agentId` بدلاً من مسارات المستأجر. **Tenant لا يرى AgentBuilder في Navigation** ولا يستطيع الوصول إليه. `systemPrompt` يُقصى من GET و PUT في tenant scope. **`PUT /agents/:id` أُزيل من Tenant scope بالكامل** — Tenant لا يُعدّل أي حقل من Agent.
+10. **TenantOutcome صلاحيات** — المستأجرون يقرأون نتائجهم فقط (`GET /outcomes`). الإنشاء/التعديل/الحذف عبر مسارات Admin فقط مع `requireSuperAdmin`. لا يمكن حذف نتائج مرتبطة بعملاء (يُعاد 409 `OUTCOME_IN_USE`).
+11. **filtration by Date** — `GET /customers` يدعم `dateFrom` و `dateTo` (كلتاهما اختيارييان). `dateTo` يشمل نهاية اليوم (23:59:59.999). التاريخ مدمج مع باقي الفلاتر (search/status/outcomeId) ويعمل مع allMatching في Bulk Delete و Campaign.
+12. **pageSize Validation** — `GET /customers` يقبل `pageSize` فقط مع القيم `10` أو `50` أو `100` (الافتراضي `10`). أي قيمة أخرى تُرجع `422 INVALID_PAGE_SIZE`.
+13. **QR Auto-Create** — إذا لم يوجد اتصال `FREE_QR`، يُنشئ Dashboard واحدًا تلقائيًا. Guard يمنع الإنشاء المتكرر. فشل GET يعرض رسالة خطأ لا عدم اتصال.
+14. **Excel Validation** — يجب أن يحتوي الملف على عمود `Name` و `Phone`. صف بدون اسم يُرفض (`اسم العميل مفقود`). صف بدون هاتف يُرفض (`رقم الهاتف مفقود`). صف فارغ يُتجاهل. لا يمكن لـ Excel تحديد `customerCode`. لا يُنشئ UploadBatch إذا فشل الملف بالكامل.
+15. **Customer Isolation** — `getCustomer` و `getCustomerConversations` يستخدمان `findFirst` مع `id + tenantId` معًا. Tenant لا يستطيع جلب عميل من Tenant آخر.
+16. **Secret Sanitization** — كل استجابة تمر عبر `sanitizeTenant` أو `sanitizeConnection`. `openaiApiKeyEnc` و `metaAccessTokenEnc` لا يظهران أبدًا — تُستبدل بـ `openaiKeyConfigured`/`metaConfigured`.
+17. **Agent PUT Disabled for Tenant** — مسار `PUT /agents/:id` أُزيل من Tenant scope بالكامل. Tenant لا يستطيع تعديل أي حقل من Agent. `systemPrompt` يُقصى من GET و PUT في tenant scope. التعديل عبر Admin فقط (`PUT /admin/tenants/:tenantId/agents/:agentId` مع `requireSuperAdmin`).
+18. **Excel Name Required** — رفع Excel يتطلب عمود `Name` في الـ Header واسمًا غير فارغ في كل صف (بـ trim). صف بدون اسم يُرفض `اسم العميل مفقود`. لا يوجد اسم افتراضي "غير محدد".
+19. **FREE_QR Unique Constraint** — `@@unique([tenantId, engine])` على `WhatsappConnection` يمنع وجود اتصالين بنفس النوع لنفس المستأجر. `createConnection` يتحقق `findFirst` أولاً ثم يلتقط Prisma P2002 ويُرجع 409 `CONNECTION_EXISTS`.
+20. **pageSize Selector Always Visible** — منتقي حجم الصفحة يظهر دائمًا حتى مع صفر نتائج. أزرار التنقل تظهر فقط عند وجود صفحات (`totalPages > 1`).
+
+### إصلاحات هذه الجولة (Round 3)
+
+| Bug | الوصف | الملف | الإصلاح |
+|---|---|---|---|
+| **Meta Webhook Routing** | مسارات `/whatsapp/webhook` كانت بعد `requireTenant` → Meta تتلقى 401 | `routes/index.ts` | نُقلت المسارات قبل `requireTenant` |
+| **API Key Leak** | `openaiApiKeyEnc` يظهر في استجابة `/auth/login` و `/auth/me` | `authController.ts` | تمت إضافة `sanitizeTenant()` للاحتفاظ بالأسرار |
+| **Chat Order** | رسائل الدردشة تظهر الأحدث أولاً بدلاً من الترتيب الزمني | `customerController.ts` | تغيير `orderBy: 'desc'` إلى `orderBy: 'asc'` |
+
+### تحسينات هذه الجولة (Round 4)
+
+| البند | الوصف | الملفات |
+|---|---|---|
+| **dateFrom/dateTo filter** | فلتر تاريخ رفع العميل في صفحة العملاء (Backend + Frontend) | `customerController.ts`, `CustomersPage.tsx` |
+| **pageSize validation** | قبول فقط 10/50/100 مع_validation صارم + منتقي في الواجهة | `customerController.ts`, `CustomersPage.tsx` |
+| **Select All Matching** | تحديد جميع النتائج المطابقة عبر الفلاتر مع dateFrom/dateTo | `CustomersPage.tsx`, `customerController.ts` |
+| **Bulk Delete** | حذف جماعي مع dateFrom/dateTo في allMatching filters | `customerController.ts`, `CustomersPage.tsx` |
+| **Campaign allMatching** | حملة جماعية مع dateFrom/dateTo في allMatching filters | `customerController.ts`, `CustomersPage.tsx` |
+| **QR Auto-Create** | إنشاء FREE_QR تلقائيًا من Dashboard + guard + error handling | `ClientDashboard.tsx` |
+| **Excel Validation** | فحص صيغة الملف + رفض صف بدون هاتف + لا UploadBatch إذا فشل بالكامل | `customerController.ts` |
+| **Customer Isolation** | `findFirst` مع `id + tenantId` في `getCustomer` و `getCustomerConversations` | `customerController.ts` |
+| **Agent Builder** | Tenant لا يرى AgentBuilder، admin routes محمية، systemPrompt مقصى | `App.tsx`, `TenantShell.tsx`, `agentController.ts` |
+| **Secret Sanitization** | `sanitizeTenant` + `sanitizeConnection` في كل الاستجابات | `authController.ts`, `whatsappController.ts`, `adminController.ts` |
+| **Dashboard Cost** | `apiCostUsd` من DB فقط، لا أسعار ثابتة، لا mock data | `customerController.ts` |
+| **48 اختبار جديد** | Date filter, PageSize, Select All, QR, Excel, Isolation, Secrets, Agent, Cost | `round4.test.ts` |
+
+### تحسينات هذه الجولة (Round 5)
+
+| البند | الوصف | الملفات |
+|---|---|---|
+| **Agent PUT Disabled** | إزالة `PUT /agents/:id` من Tenant scope بالكامل — التعديل عبر Admin فقط | `routes/index.ts` |
+| **Excel Name Required** |رفض صف بدون اسم في Excel (`اسم العميل مفقود`) + لا اسم افتراضي + trim قبل الفحص | `customerController.ts` |
+| **FREE_QR Unique** | `@@unique([tenantId, engine])` على WhatsappConnection + Migration CREATE UNIQUE INDEX + P2002 handling (409 CONNECTION_EXISTS) | `schema.prisma`, `migration.sql`, `whatsappController.ts` |
+| **pageSize Selector Always Visible** | منتقي الحجم يظهر حتى مع صفر نتائج (`!data` بدلاً من `!data \|\| data.items.length === 0`) | `CustomersPage.tsx` |
+| **Customer Isolation R5** | توثيق إضافي: `findFirst` مع `id + tenantId` في `getCustomer` و `getCustomerConversations` — لا عبور بين Tenants | `customerController.ts` |
+| **41 اختبار جديد** | pageSize validation, Excel name, FREE_QR unique, Agent PUT, Customer isolation, QR Auto-Create, Migration safety | `round4.test.ts` |
+| **Test Classification Update** | تصنيف صادق: 89 Source Inspection + 48 Unit (Backend) + 45 Integration (Frontend) | `SYSTEM_DOCUMENTATION.md` |
 
 ---
 

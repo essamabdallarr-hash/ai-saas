@@ -1,6 +1,7 @@
 import { MessageCircle, Phone, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Spinner } from '@/components/ui';
+import { useI18n } from '@/i18n';
 import { HumanTakeoverButton } from './HumanTakeoverButton';
 import { TranscriptFeed } from './TranscriptFeed';
 import { WhatsAppThread } from './WhatsAppThread';
@@ -18,6 +19,7 @@ interface LiveState {
 }
 
 export function LiveInbox() {
+  const { t } = useI18n();
   const [state, setState] = useState<LiveState>({
     conversations: [],
     eventsByCall: {},
@@ -29,17 +31,13 @@ export function LiveInbox() {
   const [loading, setLoading] = useState(true);
   const socketRef = useRef<LiveSocket | null>(null);
 
-  // تحميل أولي + WebSocket
   useEffect(() => {
-    // Step 3: GET /conversations → المحادثات المفتوحة النشطة
     api<Conversation[]>('/conversations')
       .then((list) => {
         setState((s) => ({ ...s, conversations: list }));
         if (list.length > 0) setSelectedId((id) => id ?? list[0].id);
       })
-      .catch(() => {
-        /* سيظهر عبر WebSocket عند توفر Step 3 */
-      })
+      .catch(() => {})
       .finally(() => setLoading(false));
 
     const socket = new LiveSocket('/ws/inbox');
@@ -144,29 +142,28 @@ export function LiveInbox() {
   return (
     <div>
       <Card
-        title={`البريد الوارد المباشر (${activeCount} محادثة نشطة)`}
+        title={`${t.inbox.liveInbox} (${activeCount} ${t.inbox.activeConversations})`}
         actions={
           <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
             <RefreshCw className="h-4 w-4" />
-            تحديث
+            {t.inbox.refresh}
           </Button>
         }
       >
         {loading ? (
-          <Spinner label="جارٍ تحميل المحادثات..." />
+          <Spinner label={t.inbox.loadingConversations} />
         ) : (
           <div className="grid min-h-[70vh] grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-            {/* قائمة المحادثات */}
-            <div className="divide-y divide-slate-100 overflow-y-auto border-l border-slate-100 lg:max-h-[70vh] lg:pl-2 scrollbar-thin">
+            <div className="divide-y divide-[#E5E7EB] overflow-y-auto border-l border-[#E5E7EB] lg:max-h-[70vh] lg:pl-2 scrollbar-thin">
               {state.conversations.length === 0 && (
-                <p className="p-4 text-sm text-slate-400">لا توجد محادثات نشطة الآن</p>
+                <p className="p-4 text-sm text-[#98A2B3]">{t.inbox.noActiveConversations}</p>
               )}
               {state.conversations.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => setSelectedId(c.id)}
                   className={`flex w-full items-center justify-between gap-2 px-2 py-3 text-right transition-colors ${
-                    selectedId === c.id ? 'bg-brand-50' : 'hover:bg-slate-50'
+                    selectedId === c.id ? 'bg-brand-50' : 'hover:bg-[#F9FCFB]'
                   }`}
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -176,13 +173,13 @@ export function LiveInbox() {
                       <MessageCircle className="h-4 w-4 shrink-0 text-ok-500" />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-slate-800" dir="ltr">
-                        {c.contactNumber || 'رقم مجهول'}
+                      <span className="block truncate text-sm font-medium text-[#111111]" dir="ltr">
+                        {c.contactNumber || t.inbox.unknownNumber}
                       </span>
-                      <span className="block text-xs text-slate-400">
+                      <span className="block text-xs text-[#98A2B3]">
                         {c.channel === 'VOICE'
                           ? formatDuration(c.call?.durationSec ?? 0)
-                          : `الواتساب · ${c.messages?.length ?? 0} رسالة`}
+                          : `${t.inbox.whatsapp} · ${c.messages?.length ?? 0} ${t.inbox.message}`}
                       </span>
                     </span>
                   </span>
@@ -195,16 +192,15 @@ export function LiveInbox() {
               ))}
             </div>
 
-            {/* تفاصيل المحادثة */}
             {selected ? (
               <div className="flex min-w-0 flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800" dir="ltr">
+                    <p className="truncate text-sm font-semibold text-[#111111]" dir="ltr">
                       {selected.contactNumber}
                     </p>
-                    <p className="text-xs text-slate-400">
-                      {selected.channel === 'VOICE' ? 'مكالمة صوتية' : 'محادثة واتساب'}
+                    <p className="text-xs text-[#98A2B3]">
+                      {selected.channel === 'VOICE' ? t.inbox.voiceCall : t.inbox.whatsappChat}
                     </p>
                   </div>
                   <HumanTakeoverButton
@@ -215,14 +211,13 @@ export function LiveInbox() {
                 </div>
 
                 {selected.channel === 'VOICE' ? (
-                  <div className="rounded-xl border border-slate-200">
-                    <div className="border-b border-slate-100 px-3 py-2 text-xs font-medium text-slate-500">
-                      التفريغ اللحظي (Live Transcript)
+                  <div className="rounded-xl border border-[#E5E7EB]">
+                    <div className="border-b border-[#E5E7EB] px-3 py-2 text-xs font-medium text-[#667085]">
+                      {t.inbox.liveTranscript}
                     </div>
                     <TranscriptFeed
                       events={selected.call ? state.eventsByCall[selected.call.id] ?? [] : []}
                     />
-                    {/* الحقول المستخرجة لحظيًا */}
                     <ExtractedPanel
                       data={
                         selected.call ? state.extractedByCall[selected.call.id] : undefined
@@ -230,7 +225,7 @@ export function LiveInbox() {
                     />
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-slate-200">
+                  <div className="rounded-xl border border-[#E5E7EB]">
                     <WhatsAppThread
                       messages={state.messagesByConversation[selected.id] ?? []}
                       connectionStatus="CONNECTED"
@@ -241,8 +236,8 @@ export function LiveInbox() {
                 )}
               </div>
             ) : (
-              <p className="flex items-center justify-center text-sm text-slate-400">
-                اختر محادثة من القائمة
+              <p className="flex items-center justify-center text-sm text-[#98A2B3]">
+                {t.inbox.selectConversationHint}
               </p>
             )}
           </div>
@@ -253,15 +248,16 @@ export function LiveInbox() {
 }
 
 function ExtractedPanel({ data }: { data?: Record<string, string> }) {
+  const { t } = useI18n();
   const entries = Object.entries(data ?? {});
   if (entries.length === 0) return null;
   return (
-    <div className="border-t border-slate-100 bg-slate-50/50 p-3">
-      <p className="mb-2 text-xs font-medium text-slate-500">الحقول المستخرجة لحظيًا</p>
+    <div className="border-t border-[#E5E7EB] bg-[#FAFAFA] p-3">
+      <p className="mb-2 text-xs font-medium text-[#667085]">{t.inbox.extractedFields}</p>
       <div className="flex flex-wrap gap-2">
         {entries.map(([key, value]) => (
-          <span key={key} className="rounded-lg bg-white px-2 py-1 text-xs ring-1 ring-slate-200">
-            <span className="text-slate-400">[{key}]</span> <span className="font-medium text-slate-700">{value}</span>
+          <span key={key} className="rounded-lg bg-white px-2 py-1 text-xs ring-1 ring-[#E5E7EB]">
+            <span className="text-[#98A2B3]">[{key}]</span> <span className="font-medium text-[#667085]">{value}</span>
           </span>
         ))}
       </div>

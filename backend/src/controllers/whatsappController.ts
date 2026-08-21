@@ -18,17 +18,25 @@ export async function createConnection(req: Request, res: Response): Promise<voi
   const existing = await prisma.whatsappConnection.findFirst({ where: { tenantId, engine } });
   if (existing) throw new ApiError(409, 'يوجد اتصال بنفس المحرك بالفعل', 'CONNECTION_EXISTS');
 
-  const connection = await prisma.whatsappConnection.create({
-    data: {
-      tenantId,
-      engine,
-      typingDelayMs,
-      spintaxEnabled,
-      metaPhoneNumberId: engine === 'OFFICIAL_META' ? metaPhoneNumberId : undefined,
-      metaWabaId: engine === 'OFFICIAL_META' ? metaWabaId : undefined,
-      metaAccessTokenEnc: engine === 'OFFICIAL_META' && metaAccessToken ? encryptSecret(metaAccessToken) : undefined,
-    },
-  });
+  let connection;
+  try {
+    connection = await prisma.whatsappConnection.create({
+      data: {
+        tenantId,
+        engine,
+        typingDelayMs,
+        spintaxEnabled,
+        metaPhoneNumberId: engine === 'OFFICIAL_META' ? metaPhoneNumberId : undefined,
+        metaWabaId: engine === 'OFFICIAL_META' ? metaWabaId : undefined,
+        metaAccessTokenEnc: engine === 'OFFICIAL_META' && metaAccessToken ? encryptSecret(metaAccessToken) : undefined,
+      },
+    });
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
+      throw new ApiError(409, 'يوجد اتصال بنفس المحرك بالفعل', 'CONNECTION_EXISTS');
+    }
+    throw err;
+  }
   res.status(201).json(sanitizeConnection(connection));
 }
 

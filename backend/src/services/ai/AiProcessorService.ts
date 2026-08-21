@@ -1,4 +1,4 @@
-import type { Agent, Conversation, ConversationMessage, DynamicField } from '@prisma/client';
+import type { Agent, Conversation, ConversationMessage, Customer, DynamicField, TenantOutcome } from '@prisma/client';
 import { ApiError } from '../../lib/errors';
 import { openAIClientFor } from '../../lib/openai';
 import { prisma } from '../../lib/prisma';
@@ -9,12 +9,13 @@ type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 /**
  * معالجة الردود عبر OpenAI gpt-4o-mini.
  * يبني System Prompt من: prompt الوكيل (المخفي من Super Admin) + أهدافه
- * + تعليمات الحقول الديناميكية + سياق RAG (يُحقن خارجياً قبل الاستدعاء).
+ * + تعليمات الحقول الديناميكية + سياق RAG (يُحقن خارجياً قبل الاستدعاء)
+ * + بيانات العميل (إن وُجدت).
  * المفتاح/النموذج يُحسمان لكل مستأجر (مفتاحه المشفر في DB يسبق مفتاح المنصة).
  */
 export class AiProcessorService {
 
-  buildSystemPrompt(agent: Agent, dynamicFields: DynamicField[], ragContext: string[]): string {
+  buildSystemPrompt(agent: Agent, dynamicFields: DynamicField[], ragContext: string[], customer?: Customer | null): string {
     const fieldsSection =
       dynamicFields.length > 0
         ? dynamicFields
@@ -32,12 +33,15 @@ export class AiProcessorService {
             .join('\n')}`
         : '';
 
+    const customerSection = buildCustomerSection(customer);
+
     return `أنت "خادم مبيعات ذكي" تعمل لصالح عميلك. اتبع النبرة والتعليمات التالية بدقة.
 
 ${agent.systemPrompt ?? 'كن محترفًا وودودًا، وتحدث بالعربية، وأجب باختصار ووضوح.'}
 
 ## الهدف
 ${agent.objective || 'مساعدة العميل وإتمام المهمة بنجاح.'}
+${customerSection}
 
 ## الحقول التي يجب استخراجها أثناء المحادثة
 ${fieldsSection}
@@ -59,9 +63,10 @@ ${fieldsSection}
     history: ConversationMessage[];
     ragContext: string[];
     dynamicFields: DynamicField[];
+    customer?: Customer | null;
   }): Promise<string> {
     const { client, llmModel } = await openAIClientFor(args.tenantId);
-    const system = this.buildSystemPrompt(args.agent, args.dynamicFields, args.ragContext);
+    const system = this.buildSystemPrompt(args.agent, args.dynamicFields, args.ragContext, args.customer);
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...args.history.slice(-12).map((m) => ({
@@ -75,6 +80,11 @@ ${fieldsSection}
       messages,
       max_tokens: 500,
       temperature: 0.7,
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('auth')) throw new ApiError(503, 'مفتاح OpenAI غير صالح', 'AI_AUTH_FAILED');
+      if (msg.includes('429') || msg.includes('rate')) throw new ApiError(429, 'تم تجاوز حد الاستدعاءات', 'AI_RATE_LIMITED');
+      throw new ApiError(502, 'فشل الاتصال بـ OpenAI', 'AI_UNAVAILABLE');
     });
 
     const reply: string = completion.choices?.[0]?.message?.content ?? '';
@@ -117,6 +127,11 @@ ${fieldsSection}
       ],
       max_tokens: 300,
       temperature: 0.3,
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('auth')) throw new ApiError(503, 'مفتاح OpenAI غير صالح', 'AI_AUTH_FAILED');
+      if (msg.includes('429') || msg.includes('rate')) throw new ApiError(429, 'تم تجاوز حد الاستدعاءات', 'AI_RATE_LIMITED');
+      throw new ApiError(502, 'فشل الاتصال بـ OpenAI', 'AI_UNAVAILABLE');
     });
     const summary: string = completion.choices?.[0]?.message?.content ?? '';
     await prisma.conversation.update({
@@ -153,6 +168,11 @@ ${opts.dynamicFields.map((f) => `"${f.key}": <قيمة نصية أو null>`).joi
       max_tokens: 400,
       temperature: 0,
       response_format: { type: 'json_object' },
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('auth')) throw new ApiError(503, 'مفتاح OpenAI غير صالح', 'AI_AUTH_FAILED');
+      if (msg.includes('429') || msg.includes('rate')) throw new ApiError(429, 'تم تجاوز حد الاستدعاءات', 'AI_RATE_LIMITED');
+      throw new ApiError(502, 'فشل الاتصال بـ OpenAI', 'AI_UNAVAILABLE');
     });
 
     let parsed: Record<string, unknown> = {};
@@ -185,6 +205,99 @@ ${opts.dynamicFields.map((f) => `"${f.key}": <قيمة نصية أو null>`).joi
     }
     return values;
   }
+
+  /**
+   * التصنيف التلقائي: يطلب من LLM اختيار نتيجة واحدة من TenantOutcome النشطة.
+   * يُستدعى بعد انتهاء المحادثة (صوت أو واتساب).
+   * - إذا لم تكن هناك نتائج معرفة → لا يصنف، لا يعتبر خطأ.
+   * - إذا أعاد LLM نتيجة غير موجودة → لا يحفظ، يحافظ على النتيجة السابقة.
+   */
+  async classifyConversation(
+    tenantId: string,
+    conversationId: string,
+    customerId: string,
+  ): Promise<void> {
+    const outcomes = await prisma.tenantOutcome.findMany({
+      where: { tenantId },
+      orderBy: { position: 'asc' },
+    });
+    if (outcomes.length === 0) return;
+
+    const messages = await prisma.conversationMessage.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    if (messages.length === 0) return;
+
+    const { client, llmModel } = await openAIClientFor(tenantId);
+    const transcript = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+
+    const outcomeList = outcomes.map((o) => `- ${o.label} (id: ${o.id})`).join('\n');
+
+    const completion = await client.chat.completions.create({
+      model: llmModel,
+      messages: [
+        {
+          role: 'system',
+          content: `أنت مصنف محادثات عملاء. اختر نتيجة واحدة فقط من القائمة التالية:${outcomeList}
+
+أرجع JSON فقط:${'\n'}{ "outcomeId": "<id>" }
+
+إذا لم تتمكن من التحديد بدقة، أرجع:${'\n'}{ "outcomeId": null }
+
+لا تخترع نتائج جديدة. اختر فقط من القائمة.`,
+        },
+        { role: 'user', content: transcript },
+      ],
+      max_tokens: 100,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('auth')) throw new ApiError(503, 'مفتاح OpenAI غير صالح', 'AI_AUTH_FAILED');
+      if (msg.includes('429') || msg.includes('rate')) throw new ApiError(429, 'تم تجاوز حد الاستدعاءات', 'AI_RATE_LIMITED');
+      throw new ApiError(502, 'فشل الاتصال بـ OpenAI', 'AI_UNAVAILABLE');
+    });
+
+    let parsed: { outcomeId?: string | null } = {};
+    try {
+      parsed = JSON.parse(completion.choices?.[0]?.message?.content ?? '{}');
+    } catch {
+      return;
+    }
+
+    const outcomeId = parsed.outcomeId;
+    if (!outcomeId || typeof outcomeId !== 'string') return;
+
+    const validOutcome = await prisma.tenantOutcome.findFirst({
+      where: { id: outcomeId, tenantId },
+    });
+    if (!validOutcome) return;
+
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { outcomeId: validOutcome.id },
+    });
+  }
+}
+
+function buildCustomerSection(customer?: Customer | null): string {
+  if (!customer) return '';
+  const parts: string[] = [];
+  parts.push(`اسم العميل: ${customer.name}`);
+  if (customer.phone) parts.push(`رقم الهاتف: ${customer.phone}`);
+  if (customer.email) parts.push(`البريد الإلكتروني: ${customer.email}`);
+  if (customer.customData && typeof customer.customData === 'object' && Object.keys(customer.customData).length > 0) {
+    const entries = Object.entries(customer.customData as Record<string, unknown>);
+    for (const [k, v] of entries) {
+      if (v !== null && v !== undefined && String(v).trim()) {
+        parts.push(`${k}: ${String(v)}`);
+      }
+    }
+  }
+  if (parts.length === 0) return '';
+  return `\n\n## بيانات العميل الحالية\n${parts.join('\n')}`;
 }
 
 export const aiService = new AiProcessorService();
